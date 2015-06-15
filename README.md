@@ -2,6 +2,7 @@
 A python toolbox for seismic surface wave analysis, still under construction.
 
 Method:
+
 FTAN analysis: compiled from the fortran version of aftan which can be downloaded from:
 http://ciei.colorado.edu/Products
 

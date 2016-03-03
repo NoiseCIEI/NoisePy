@@ -1,0 +1,39 @@
+#!/bin/tcsh
+set per=20
+set name=tomo_ph_L_20
+set data=proba_L_20.dat
+set alpha0=300 # 600 #${alphalst[$i]}
+set damp0=1.0
+set sigma0=50 #250 #${sigma2[$i]}
+echo "../bin/tomo_sp_cu_s_shn_.1 $data $name $per"
+../bin/tomo_sp_cu_s_shn_.1 $data $name $per << EOF
+me 
+4
+5
+35
+40 
+0.1
+6
+-120
+-115
+0.1
+10
+0.005 
+2 
+L
+P 
+0.1 
+1.5
+11
+0
+12
+$alpha0
+$damp0
+$sigma0
+$sigma0
+19
+v
+q
+go
+EOF
+exit

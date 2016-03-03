@@ -1,0 +1,9 @@
+sel.sh tomo_phvel_SNR10_20_TT.dat proba_L_20.dat
+run_test
+CC_US_path proba_L_20.dat
+CC_US_vel tomo_ph_L_20_20.1
+#
+sel_110_105.sh tomo_phvel_SNR10_20_TT.dat proba_110_105_L_20.dat
+run_test_110_105
+CC_US_path_110_105 proba_110_105_L_20.dat
+CC_US_vel_110_105 tomo_110_105_ph_L_20_20.1

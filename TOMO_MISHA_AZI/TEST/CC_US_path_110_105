@@ -1,0 +1,30 @@
+#!/bin/csh
+# Plot paths map of US
+#
+alias cp cp
+alias rm rm
+gmtset ANOT_FONT_SIZE 12
+gmtset BASEMAP_TYPE plain
+
+set output_ps_file = $1.path.ps
+if( -f $output_ps_file) rm $output_ps_file
+set input_map_1 = $1 
+#
+set coord=R-110/-105/35/40
+set pr=X6d/5d
+#
+awk 'BEGIN{print ">"}{print $3,$2;print $5,$4;print ">"}' $input_map_1 > tmp.1
+set n=`awk 'BEGIN{n=0}{if(NF == 2)n++}END{print int(n/2);}' tmp.1`
+pscoast -$coord -J$pr -Ba1g1f.5WSnE -W3/0/0/0 -A100 -N1/3/0/0/0 \
+-N2/1/0/0/0 -S135/206/250 -Df -K  -V -P -K -X0.8 -Y4.0 > $output_ps_file
+psxy tmp.1 -$coord -J$pr -M  -W1 -N -O -K >> $output_ps_file
+#
+# label plot 1
+#
+pstext -R0/10/0/10 -JX10 -V -O  -N  -G255/0/0 << END >>  $output_ps_file
+3.0 5.4 16 0.0 7 6  US. Love, $n ray paths, T=20 s
+END
+#
+gv $output_ps_file &
+rm grd*
+exit

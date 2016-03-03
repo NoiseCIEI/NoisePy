@@ -1,0 +1,39 @@
+#!/bin/csh
+# Plot velocity map of US
+#
+alias cp cp
+alias rm rm
+gmtset ANOT_FONT_SIZE 12
+gmtset BASEMAP_TYPE plain
+
+set root=$1:r
+set output_ps_file = $root.vel.ps
+if( -f $output_ps_file) rm $output_ps_file
+set input_map_1 = $root.1 
+#
+set coord=R-120/-115/35/40
+set pr=X6d/5d
+set color_table_1=vel_col.cpt
+#makecpt -Cno_green -T3.5/4.2/.05 -I -Z  > $color_table_1
+makecpt -Cno_green -T3.5/4.0/.05 -I -Z  > $color_table_1
+#set input_map_3=xypb
+#
+awk '{print $1,$2,$3}' $input_map_1 > tmp.1
+minmax tmp.1
+xyz2grd tmp.1 -Ggrdfile_top -$coord -I.1
+grdsample grdfile_top -Ggrdfile_top2 -$coord -I0.05
+grdimage grdfile_top2 -C$color_table_1 -V  -J$pr -$coord -P -K -X0.8 -Y4.0 > $output_ps_file
+pscoast -$coord -J$pr -Ba1g1f.5WSnE -W3/0/0/0 -A100 -N1/3/0/0/0 \
+-N2/1/0/0/0 -S135/206/250 -Df -K  -O -V >> $output_ps_file
+#psxy $input_map_3 -J$pr -$coord -: -M  -W7/255/255/225 -O -K >> $output_ps_file
+psscale  -C$color_table_1 -D6.5/2.5/5/0.2 -O -K  >> $output_ps_file
+#
+# label plot 1
+#
+pstext -R0/10/0/10 -JX10 -V -O  -N  -G255/0/0 << END >>  $output_ps_file
+3.0 5.4 16 0.0 7 6  US. Love phase velocity, T=20 s
+END
+#
+gv $output_ps_file &
+rm grd* tmp.*
+exit

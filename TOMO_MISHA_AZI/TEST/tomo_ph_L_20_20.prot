@@ -1,0 +1,62 @@
+Protocol: tomo_sp_cu_s, v1.2.2_.1 (Gaussian rays)
+========================================================
+ PERIOD= 20(sec)
+ INFILE=proba_L_20.dat
+ OUTFILE=tomo_ph_L_20
+ model=   N 
+ weights=   N 
+ dens & azimuth maps=Y
+ selection= N
+ percent map=Y
+ anisotropy=N 0-psi type
+ rejection by %=N
+ rejection by dist=N
+ residuals= Y
+ covariance matrix= N
+ geogr-->geoc= Y
+ geoc-->geogr= Y
+ Fresnel zone= N
+ resolution analysis = N
+ input data format = N
+ RAY TRACER mode = N
+ resolution response maps = N
+ Contour file name is: contour.ctr
+ 0PSI: alpha1, alpha2, sigma1, sigma2  300.000  1.000   50.000   50.000
+ 0PSI-prec, 2PSI-prec, 4PSI-prec     8.0     8.0     8.0
+ Limits of latitude:       35.00      40.00  Increment= 0.100 npoints=   51
+ Limits of longitude:    -120.00    -115.00  Increment= 0.100 npoints=   51
+ Step of integration: 0.0050
+ X-zone: 2.0000
+ Rayleigh/Love: L
+ Group/Phase velocity: P
+ Model for slowness: PREM.MODEL
+ Azimus pole: lat =   90.00, lon =    0.00
+THERE WERE    535 PATHS; only     535 PATHS LEFT
+    SQUARE ROOT mean velocity=   3.742 km/sec
+Input      - <Wed Dec 18 13:51:11 2013>, Duration:  0: 0: 0     0
+Isotropic grid cells:
+ Average square of cells is:     0.0100044868 (deg**2)
+ Average length of cells is:     0.1000224317 (deg)
+ Point outside contour: Lat=   0.000 Lon=    0.000
+ n_pnt1 =          414
+ Cells:      4123448 , nm=        1896 , nd+1=         830 , aniz=           0
+Normalization factors: Isotr -  0.04946
+    Number of Paths=    535
+ R1 traces:         535  R2 Traces:           0
+ Number of integrals are:          535
+SQRT of initial residuals dispersion are:     1.323 sec /    1.323/
+SQ_RT of initial velocities dispersion are:   0.05852 km/sec
+Integrals  - <Wed Dec 18 13:51:29 2013>, Duration:  0: 0:18    18
+  MAXIMUM of asimutal parameter is :    135.0000    
+Gauss      - <Wed Dec 18 13:52:47 2013>, Duration:  0: 1:18    78
+ Matrix is done
+ Matrix elements:   144000000  Zero are:        5372
+ Total number of matrix lines are        2431
+ Maximum intersections/cell are:    487.5175      R1:   487.5175      R2:   0.000000    
+ Isotropy   Trace/Size F       273.2019
+Inversion  - <Wed Dec 18 13:52:52 2013>, Duration:  0: 0: 5     5
+Matrix condition =    0.159280E-01
+SQRT of final residuals dispersion are:     0.587 sec /    0.587/
+SQ_RT of final velocities dispersion are:   0.02719 km/sec
+Velocities - <Wed Dec 18 13:52:53 2013>, Duration:  0: 0: 1     1
+ average velocity  =      3.76170 (km/sec), npoints=   2341

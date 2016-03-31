@@ -31,8 +31,8 @@ A python module for ambient seismic noise interferometry, receiver function anal
     email: lili.feng@colorado.edu
 """
 
-import obspy.sac.sacio as sacio
-import obspy.core.util.geodetics as obsGeo
+# import obspy.sac.sacio as sacio
+import obspy.geodetics as obsGeo
 import obspy.taup.taup
 import obspy
 import pyaftan as ftan  # Comment this line if you do not have pyaftan
@@ -50,7 +50,7 @@ import math
 import fftw3 # pyfftw3-0.2
 import time
 import shutil
-import CURefPy as ref # Comment this line if you do not have CURefPy
+# import CURefPy as ref # Comment this line if you do not have CURefPy
 from subprocess import call
 from mpl_toolkits.basemap import Basemap
 import warnings
@@ -1516,7 +1516,7 @@ class StaInfo(object):
             fsnr=noisefile(sacfname+'_amp_snr','SNR')
             (pvel,gvel) = fDISP.get_phvel(per);
             (snr,signal1,noise1) = fsnr.get_snr(per);
-            dist, az, baz=obsGeo.gps2DistAzimuth(station1.lat, station1.lon, station2.lat, station2.lon ) # distance is in m
+            dist, az, baz=obsGeo.base.gps2dist_azimuth(station1.lat, station1.lon, station2.lat, station2.lon ) # distance is in m
             dist=dist/1000.
             if filetype=='phase':
                 TravelT=dist/pvel
@@ -1806,7 +1806,7 @@ class StaInfo(object):
                         marker_N=1;
                     if marker_EN[marker_E , marker_N]!=0:
                         continue;
-                    dist, az, baz=obsGeo.gps2DistAzimuth(lat,lon,lat2,lon2);
+                    dist, az, baz=obsGeo.base.gps2dist_azimuth(lat,lon,lat2,lon2);
                     dist=dist/1000.
                     if dist< cdist*2 and dist >= 1:
                         marker_nn=marker_nn-1;
@@ -1842,9 +1842,9 @@ class StaInfo(object):
                     lat = y0+j*dy;
                     tempdist=npr.evaluate('112.*sqrt(((lonin-lon)**2)*cos(lat*pi/180.)**2 + (latin-lat)**2)'); 
                     imin=np.argmin(tempdist);
-                    mdist, az, baz=obsGeo.gps2DistAzimuth(lat,lon,latin[imin],lonin[imin]);
+                    mdist, az, baz=obsGeo.base.gps2dist_azimuth(lat,lon,latin[imin],lonin[imin]);
                     mdist=mdist/1000.
-                    distevent, az, baz=obsGeo.gps2DistAzimuth(lat, lon, sta1_lat, sta1_lon); #### NEED TO BE CHECK!!!
+                    distevent, az, baz=obsGeo.base.gps2dist_azimuth(lat, lon, sta1_lat, sta1_lon); #### NEED TO BE CHECK!!!
                     distevent=distevent/1000.
                     # print "DISTEVENT: ", distevent
                     az = az + 180.;
@@ -1983,7 +1983,7 @@ class StaInfo(object):
                 evlo=sacf.GetHvalue('evlo')
                 stla=sacf.GetHvalue('stla')
                 stlo=sacf.GetHvalue('stlo')
-                dist, az, baz=obsGeo.gps2DistAzimuth(evla, evlo, stla, stlo) # distance is in m
+                dist, az, baz=obsGeo.base.gps2dist_azimuth(evla, evlo, stla, stlo) # distance is in m
                 dist=dist/1000.
                 sacf.SetHvalue('dist',dist)
             depth=sacf.GetHvalue('evdp')/1000.
@@ -2084,7 +2084,7 @@ class StaInfo(object):
         self.GetPoslon()
         lon=self.lon
         lat=self.lat
-        dist_x, az, baz = obsGeo.gps2DistAzimuth(float(int(lat)), float(int(lon)), float(int(lat)), float(int(lon))+dlon);
+        dist_x, az, baz = obsGeo.base.gps2dist_azimuth(float(int(lat)), float(int(lon)), float(int(lat)), float(int(lon))+dlon);
         dist_x=dist_x/1000.;
         Nx=int(111.1949/dist_x)+1;
         Ny=5;
@@ -2097,7 +2097,7 @@ class StaInfo(object):
                 clat=float(int(lat))+ilat*dlat;
                 if float(clon)>maxlon or float(clon) < minlon or float(clat)>maxlat or float(clat) < minlat:
                     continue
-                dist, az, baz = obsGeo.gps2DistAzimuth(float(clat), float(clon) , float(lat), float(lon))
+                dist, az, baz = obsGeo.base.gps2dist_azimuth(float(clat), float(clon) , float(lat), float(lon))
                 dist=dist/1000.
                 if dist > crifactor*111.1949:
                     # print clat, dist, crifactor*111.1949
@@ -2213,7 +2213,6 @@ class StaInfo(object):
         if self.lon>180.:
             self.lon=self.lon-360.;
         return
-    
     
 class StaLst(object):
     """
@@ -2832,7 +2831,7 @@ class staPair(object):
                             c3tr.stats.sac.kevnm=c11.stats.sac.kevnm
                             c3tr.stats.sac.evla=c11.stats.sac.evla
                             c3tr.stats.sac.evlo=c11.stats.sac.evlo
-                            dist, az, baz=obsGeo.gps2DistAzimuth(c3tr.stats.sac.evla, c3tr.stats.sac.evlo, \
+                            dist, az, baz=obsGeo.base.gps2dist_azimuth(c3tr.stats.sac.evla, c3tr.stats.sac.evlo, \
                                 c3tr.stats.sac.stla, c3tr.stats.sac.stlo) # distance is in m
                             c3tr.stats.sac.dist=dist/1000.
                             c3tr.stats.sac.az=az
@@ -3243,7 +3242,7 @@ class staPair(object):
         if self.station1.lat==self.station2.lat and self.station1.lon == self.station2.lon:
             print 'Error: Common locations for event and station!'
             return
-        dist, az, baz=obsGeo.gps2DistAzimuth(self.station1.lat, self.station1.lon, self.station2.lat, self.station2.lon ) # distance is in m
+        dist, az, baz=obsGeo.base.gps2dist_azimuth(self.station1.lat, self.station1.lon, self.station2.lat, self.station2.lon ) # distance is in m
         self.az=az
         self.baz=baz
         self.dist=dist/1000.
@@ -4081,12 +4080,12 @@ def GetdxdyDataBase(dx=0.2):
     for lat in latLst:
         if lat == -90:
             continue
-        dist, az, baz=obsGeo.gps2DistAzimuth(lat, midlon, lat-dx, midlon )
+        dist, az, baz=obsGeo.base.gps2dist_azimuth(lat, midlon, lat-dx, midlon )
         dy_km=np.append(dy_km, dist/1000.)
-        dist, az, baz=obsGeo.gps2DistAzimuth(lat, midlon, lat, midlon+dx )
+        dist, az, baz=obsGeo.base.gps2dist_azimuth(lat, midlon, lat, midlon+dx )
         dx_km=np.append(dx_km, dist/1000.)
         
-    dist, az, baz=obsGeo.gps2DistAzimuth(-90., midlon, -90., midlon+dx )
+    dist, az, baz=obsGeo.base.gps2dist_azimuth(-90., midlon, -90., midlon+dx )
     dx_km=np.append(dist/1000., dx_km)
     dx_km=np.append(dx_km, latLst);
     dx_km=dx_km.reshape(2,len(latLst))

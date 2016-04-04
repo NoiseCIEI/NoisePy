@@ -12,19 +12,20 @@ f1='/lustre/janus_scratch/life9360/EA_ses3d_working_dir/OUTPUT_SAC_EA_10sec_1km_
 # f2='/lustre/janus_scratch/life9360/SES3D_WorkingDir/OUTPUT_SAC/LF.S005032..BXZ.SAC'
 # f2='/projects/life9360/SYN_TEST_ARTIE/DATA/TOMO_1D.ak135/SAC_Z/S006001.SS.BXZ.sem.sac'
 # f2='/lustre/janus_scratch/life9360/SES3D_WorkingDir/OUTPUT_SAC_vel/LF.S002008..BXZ.SAC'
-# f2='/lustre/janus_scratch/life9360/SES3D_WorkingDir/OUTPUT_SAC/LF.S005020..BXZ.SAC'
+f='/home/lili/code/NoisePy/instaseis_ftan/LF.S000.SAC'
 
 #prefname='/lustre/janus_scratch/life9360/EA_ses3d_working_dir/OUTPUT_DISP_EA_10sec_1km_001/PREPHASE_R/NKNT.EA123S32.pre'
 prefname='/projects/life9360/code/PRE_PHASE/ALASKA_L/CLCO.N25K.pre'
-f='/projects/life9360/TA.O11A/COR_TA.O11A_TA.Q21A.SAC_TT_s'
+# f='/projects/life9360/TA.O11A/COR_TA.O11A_TA.Q21A.SAC_TT_s'
 st=obspy.read(f)
 tr=st[0]
 tr=npy.noisetrace(tr.data, tr.stats)
 tr.aftan(piover4=-1., pmf=True, tmin=2.0, tmax=50.0, phvelname=prefname)
-tr1=npy.noisetrace(tr.data, tr.stats)
-tr1.aftan(piover4=0, pmf=True, tmin=2.0, tmax=50.0, phvelname=prefname)
-tr1.ftanparam.FTANcomp(tr.ftanparam)
-# 
+# tr1=npy.noisetrace(tr.data, tr.stats)
+# tr1.aftan(piover4=0, pmf=True, tmin=2.0, tmax=50.0, phvelname=prefname)
+# tr1.ftanparam.FTANcomp(tr.ftanparam)
+
+
 # st=obspy.read(f2)
 # tr=st[0]
 # tr2=npy.noisetrace(tr.data, tr.stats)

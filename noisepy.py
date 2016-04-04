@@ -47,7 +47,11 @@ import numexpr as npr
 from functools import partial
 import multiprocessing as mp
 import math
-import fftw3 # pyfftw3-0.2
+try:
+    import fftw3 # pyfftw3-0.2
+    useFFTW=True;
+except:
+    useFFTW=False;
 import time
 import shutil
 # import CURefPy as ref # Comment this line if you do not have CURefPy
@@ -72,6 +76,7 @@ class ftanParam(object):
               arr1(6,:) -  discrimination function
               arr1(7,:) -  signal/noise ratio, Db
               arr1(8,:) -  maximum half width, s
+              arr1(9,:) -  amplitudes, nm/m
     arr2_1   - final results
     nfout2_1 - output number of frequencies for arr2, (integer*4)
               Description: real*8 arr2(7,n), n >= nfin)
@@ -83,6 +88,7 @@ class ftanParam(object):
               arr2(5,:) -  amplitudes, Db
               arr2(6,:) -  signal/noise ratio, Db
               arr2(7,:) -  maximum half width, s
+              arr2(8,:) -  amplitudes, nm/m
     tamp_1      -  time to the beginning of ampo table, s (real*8)
     nrow_1      -  number of rows in array ampo, (integer*4)
     ncol_1      -  number of columns in array ampo, (integer*4)
@@ -103,6 +109,7 @@ class ftanParam(object):
              arr1(6,:) -  discrimination function, (real*8)
              arr1(7,:) -  signal/noise ratio, Db (real*8)
              arr1(8,:) -  maximum half width, s (real*8)
+             arr1(9,:) -  amplitudes, nm/m
     arr2_2   - final results
     nfout2_2 - output number of frequencies for arr2, (integer*4)
              Description: real*8 arr2(7,n), n >= nfin)
@@ -114,6 +121,7 @@ class ftanParam(object):
              arr2(5,:) -  amplitudes, Db (real*8)
              arr2(6,:) -  signal/noise ratio, Db (real*8)
              arr2(7,:) -  maximum half width, s (real*8)
+             arr2(8,:) -  amplitudes, nm/m
     tamp_2      -  time to the beginning of ampo table, s (real*8)
     nrow_2      -  number of rows in array ampo, (integer*4)
     ncol_2      -  number of columns in array ampo, (integer*4)
@@ -441,7 +449,10 @@ class noisetrace(obspy.core.trace.Trace):
             self.ftanparam
         except:
             self.init_ftanParam()
-        dist=self.stats.sac.dist
+        try:
+            dist=self.stats.sac.dist;
+        except:
+            dist=self.stats.distance;
         if (phvelname==''):
             phvelname='./ak135.disp';
         nprpv = 0
@@ -473,7 +484,10 @@ class noisetrace(obspy.core.trace.Trace):
             sig=np.append(tempsac.data,np.zeros( float(32768-tempsac.data.size) ) )
             nsam=int( float (tempsac.stats.npts) )### for unknown reasons, this has to be done, nsam=int(tempsac.stats.npts)  won't work as an input for aftan
         dt=tempsac.stats.delta
-        dist=tempsac.stats.sac.dist
+        try:
+            dist=tempsac.stats.sac.dist;
+        except:
+            dist=tempsac.stats.distance;
         # Start to do aftan utilizing pyaftan
         self.ftanparam.nfout1_1,self.ftanparam.arr1_1,self.ftanparam.nfout2_1,self.ftanparam.arr2_1,self.ftanparam.tamp_1,\
         self.ftanparam.nrow_1,self.ftanparam.ncol_1,self.ftanparam.ampo_1, self.ftanparam.ierr_1= ftan.aftanpg(piover4, nsam, \

@@ -58,12 +58,40 @@ for n in np.arange(Nsta):
     trZ.write(outfname,format='SAC');
 
 
+SpecStream=obspy.Stream();
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data/SAC_homo/MEM2D.30S30..SAC')[0])
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data/SAC_homo/MEM2D.35S35..SAC')[0])
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data/SAC_homo/MEM2D.40S40..SAC')[0])
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data/SAC_homo/MEM2D.45S45..SAC')[0])
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data/SAC_homo/MEM2D.50S50..SAC')[0])
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data/SAC_homo/MEM2D.55S55..SAC')[0])
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data/SAC_homo/MEM2D.60S60..SAC')[0])
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data/SAC_homo/MEM2D.65S65..SAC')[0])
+
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S30..SAC')[0])
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S31..SAC')[0])
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S32..SAC')[0])
+# SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S33..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S34..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S35..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S36..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S37..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S38..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S39..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S40..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S41..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S42..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S43..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S44..SAC')[0])
+SpecStream.append(obspy.read('/lustre/janus_scratch/life9360/specfem2d_data_001/SAC_homo/MEM2D.24S45..SAC')[0])
 
 VgrArr=np.array([]);
 AmpArr=np.array([]);
 DistArr=np.array([]);
 per=12.;
 for trace in InstaStream:
+# per=10.
+# for trace in SpecStream:
     staname = str('S%03d' %n)
     lon=n*dDelta+Ni
     stla=0;

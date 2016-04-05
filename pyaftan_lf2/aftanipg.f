@@ -1,23 +1,24 @@
 c======================================================================
-c aftanpg function. Provides regular ftan analysis, jumps correction,
-c and amplitude map output for input periods.
+c aftanipg function. Provides ftan analysis with phase match filter,
+c jumps correction, phase velocity computation and amplitude map 
+c output for input periods.
 c
 c
-c Autor: M.Barmine,CIEI,CU. Date: Jun 15,2006. Version: 2.00
+c Autor: M. Barmine,CIEI,CU. Date: Jun 15, 2006. Version: 2.00
 c
-      subroutine aftanpg(piover4,n,sei,t0,dt,delta,vmin,vmax,tmin,tmax,
-     *           tresh,ffact,perc,npoints,taperl,nfin,fsnr,nphpr,
-     *           phprper,phprvel,nfout1,arr1,nfout2,arr2,tamp,
-     *           nrow,ncol,amp,ierr)
+      subroutine aftanipg(piover4,n,sei,t0,dt,delta,vmin,vmax,tmin,tmax,
+     *           tresh,ffact,perc,npoints,taperl,nfin,fsnr,fmatch,npred,
+     *           pred,nphpr,phprper,phprvel,nfout1,arr1,nfout2,arr2,
+     *           tamp,nrow,ncol,amp,ierr)
 c======================================================================
-c Parameters for aftanpg function:
+c Parameters for aftanipg function:
 c Input parameters:
 c piover4 - phase shift = pi/4*piover4, for cross-correlation
 c           piover4 should be   -1.0 !!!!     (real*8)
 c n       - number of input samples, (integer*4)
-c sei     - input waveform length of n, (real*4)
+c sei     - input array length of n, (real*4)
 c t0      - time shift of SAC file in seconds, (real*8)
-c dt      - sampling step, in seconds, (real*8)
+c dt      - sampling rate in seconds, (real*8)
 c delta   - distance, km (real*8)
 c vmin    - minimal group velocity, km/s (real*8)
 c vmax    - maximal value of the group velocity, km/s (real*8)
@@ -30,12 +31,16 @@ c npoints - max number points in jump, (integer*4)
 c taperl  - factor for the left end seismogram tapering,
 c           taper = taperl*tmax,    (real*8)
 c nfin    - starting number of frequencies, nfin <= 100,(integer*4)
-c fsnr    - NOT USED, for future extensions (real*8)
+c fsnr    - phase match filter parameter, spectra ratio to 
+c           determine cutting point   (real*8)
+c fmatch  - factor to length of phase matching window (real*8)
+c npred   - length of the group velocity prediction table
+c pred    - group velocity prediction table:    (real*8)
+c pred(0,:) - periods of group velocity prediction table, s
+c pred(1,:) - pedicted group velocity, km/s
 c nphpr   - length of phprper and phprvel arrays
 c phprper - predicted phase velocity periods, s
 c phprvel - predicted phase velocity for corresponding periods, s
-c NOTE. If nphpr = 0, aftanpg subroutine does not output phase
-c       velocity branch, instead of it outputs phase.
 c ==========================================================
 c Output parameters are placed in 2-D arrays arr1 and arr2,
 c arr1 contains preliminary results and arr2 - final.
@@ -43,25 +48,25 @@ c ==========================================================
 c nfout1 - output number of frequencies for arr1, (integer*4)
 c arr1   - preliminary results.
 c          Description: real*8 arr1(8,n), n >= nfin)
-c          arr1(1,:) -  central periods, s
-c          arr1(2,:) -  observed periods, s
-c          arr1(3,:) -  group velocities, km/s or phase if nphpr=0, rad
-c          arr1(4,:) -  phase velocities, km/s
-c          arr1(5,:) -  amplitudes, Db
-c          arr1(6,:) -  discrimination function
-c          arr1(7,:) -  signal/noise ratio, Db
-c          arr1(8,:) -  maximum half width, s
+c          arr1(1,:) -  central periods, s (real*8)
+c          arr1(2,:) -  apparent periods, s (real*8)
+c          arr1(3,:) -  group velocities, km/s (real*8)
+c          arr1(4,:) -  phase velocities, km/s (real*8)
+c          arr1(5,:) -  amplitudes, Db (real*8)
+c          arr1(6,:) -  discrimination function, (real*8)
+c          arr1(7,:) -  signal/noise ratio, Db (real*8)
+c          arr1(8,:) -  maximum half width, s (real*8)
 c arr2   - final results
 c nfout2 - output number of frequencies for arr2, (integer*4)
 c          Description: real*8 arr2(7,n), n >= nfin)
-c          If nfout2 == 0, no final result.
-c          arr2(1,:) -  central periods, s
-c          arr2(2,:) -  observed periods, s
-c          arr2(3,:) -  group velocities, km/sor phase if nphpr=0, rad
-c          arr2(4,:) -  phase velocities, km/s
-c          arr2(5,:) -  amplitudes, Db
-c          arr2(6,:) -  signal/noise ratio, Db
-c          arr2(7,:) -  maximum half width, s
+c          If nfout2 == 0, no final results.
+c          arr2(1,:) -  central periods, s (real*8)
+c          arr2(2,:) -  apparent periods, s (real*8)
+c          arr2(3,:) -  group velocities, km/s (real*8)
+c          arr1(4,:) -  phase velocities, km/s (real*8)
+c          arr2(5,:) -  amplitudes, Db (real*8)
+c          arr2(6,:) -  signal/noise ratio, Db (real*8)
+c          arr2(7,:) -  maximum half width, s (real*8)
 c          tamp      -  time to the beginning of ampo table, s (real*8)
 c          nrow      -  number of rows in array ampo, (integer*4)
 c          ncol      -  number of columns in array ampo, (integer*4)
@@ -70,23 +75,22 @@ c ierr   - completion status, =0 - O.K.,           (integer*4)
 c                             =1 - some problems occures
 c                             =2 - no final results
 c======================================================================
-
       implicit none
       include 'fftw3.h'
       integer*4 n,npoints,nf,nfin,nfout1,ierr,nrow,ncol
 cc      real*8    piover4,perc,taperl,tamp,arr1(8,100),arr2(7,100)
       real*8    piover4,perc,taperl,tamp,arr1(9,100),arr2(8,100)
       real*8    t0,dt,delta,vmin,vmax,tmin,tmax,tresh,ffact,ftrig(100)
-      real*8    fsnr
+      real*8    fsnr,fmatch
       real*4    sei(32768)
       double complex dczero,s(32768),sf(32768),fils(32768),tmp(32768)
       real*8    grvel(100),tvis(100),ampgr(100),om(100),per(100)
       real*8    tim(100)
       real*8    pha(32768,100),amp(32768,100),ampo(32768,100)
       real*8    time(32768),v(32768),b(32768)
-      real*8    alpha,pi,omb,ome,dom,step,amax,t,dph,tm,ph,amaxlf
+      real*8    alpha,pi,omb,ome,dom,step,amax,t,dph,tm,ph, amaxlf
       integer*4 j,k,m,ntapb,ntape,ne,nb,ntime,ns,ntall,ici,iciflag,ia
-      real*8    plan1,plan2
+      real*8    plan1,plan2,plan3,plan4
       integer*4 ind(2,32768)
       real*8    ipar(6,32768)
       real*8    grvel1(100),tvis1(100),ampgr1(100),ftrig1(100)
@@ -97,26 +101,32 @@ c ---
       real*8    dmaxt,wor,per2(100),om1(100),snr(100),snr1(100)
       real*8    snrt(100)
       real*8    wdth(100),wdth1(100),wdtht(100)
-      integer*4 ip,iflag,ierr1,nindx,imax,iimax,ipos,ist,ibe,nfout2
+      integer*4 iflag,ierr1,nindx,imax,iimax,ipos,ist,ibe,nfout2
       integer*4 indx(100)
       integer*4 mm,mi,iml,imr,indl,indr,nphpr
       real*8    lm,rm,phprper(300),phprvel(300)
+c ---
+      integer*4 ip,npred,inds,inde
+      real*8    om0,tg0,omstart,dw,pha_corr,ome1,omb1,maxTpr,minTpr
+      real*8    pred(300,2),omdom(32768), ampdom(32768)
+      double complex dci,dc2,pha_cor(32768),env(32768),spref(32768)
 
       ierr = 0
-      fsnr = fsnr
 cxx   fsnr = 1.0d0
-      dczero = (0.0d0,0.0d0)
+      dczero = dcmplx(0.0d0,0.0d0)
+      dci    = dcmplx(0.0d0,1.0d0)
+      dc2    = dcmplx(2.0d0,0.0d0)
       lm = 0.0d0
       rm = 0.0d0
       iml = 0
       imr = 0
-      ip = 1
       pi = datan(1.0d0)*4.0d0
 c number of FTAN filters
       nf = nfin
 c automatic width of filters * factor ffact
 ccc     alpha = ffact*20.0d0*dsqrt(delta/1000.0d0) Modified by LF
-      alpha = ffact*20.0d0*dsqrt(delta/1000.0d0) 
+ccc     alpha = ffact*20.0d0*dsqrt(delta/1000.0d0) LFLFLF
+      alpha = ffact*20.0d0*dsqrt(100.0d0/1000.0d0)
 c  number of samples for tapering, left end
       ntapb = nint(taperl*tmax/dt)
 c  number of samples for tapering, right end
@@ -124,6 +134,17 @@ c  number of samples for tapering, right end
 c [omb,ome] - frequency range
       omb = 2.0d0*pi/tmax
       ome = 2.0d0*pi/tmin
+c find min/max of prediction period
+      maxTpr = pred(1,1)
+      minTpr = pred(1,1)
+      do i =2,npred
+        if(pred(i,1).ge.maxTpr) maxTpr = pred(i,1)
+        if(pred(i,1).le.minTpr) minTpr = pred(i,1)
+      enddo
+c evaluation of spline polinomial forms for phase match filter
+      ip = 1
+      call pred_cur(ip,delta,dsqrt(omb*ome),npred,pred,om0,tg0)
+c      write(*,*)'T0= ',2.0d0*pi/om0,', tg0= ',tg0 NoisePy
 c seismgram tapering
       nb = max0(2,nint((delta/vmax-t0)/dt))
       tamp = (nb-1)*dt+t0
@@ -145,8 +166,10 @@ c prepare FTAN filters
 c log scaling for frequency
       do k = 1,nf
         om(k) = dexp(log(ome)+(k-1)*step)
-        per(k) = 2*pi/om(k)
+        per(k) = 2.0d0*pi/om(k)
       enddo
+c==================================================================
+c Phase match filtering
 c make backward FFT for seismogram: s ==> sf
       call dfftw_plan_dft_1d(plan1,ns,s,sf,
      *                         FFTW_FORWARD, FFTW_ESTIMATE)
@@ -155,6 +178,49 @@ c make backward FFT for seismogram: s ==> sf
 c filtering and FTAN amplitude diagram construction
       call dfftw_plan_dft_1d(plan2,ns,fils,tmp,
      *                         FFTW_BACKWARD, FFTW_ESTIMATE)
+      sf(1) = sf(1)/2.0d0
+      sf(ns/2+1) = dcmplx(dreal(sf(ns/2+1)),0.0d0)
+c spectra tapering
+      ome1 = min(ome,2.0d0*pi/minTpr)
+      omb1 = max(omb,2.0d0*pi/maxTpr)
+      call tapers(omb1,ome1,dom,alpha,ns,   omstart,inds,inde,omdom,ampdom)
+      omstart = real(nint(omstart/dom))*dom
+      inde = min0(inde,ns/2+2)
+      do i = 1,ns
+          if(i.lt.inds) then
+              pha_cor(i) = dczero
+          elseif(i.gt.inde) then
+              pha_cor(i) = dczero
+          else
+              call msplint(ip+1,om0,omdom(i),pha_corr,ierr)
+              pha_cor(i) = dcmplx(pha_corr,0.0d0)
+          endif
+          pha_cor(i) = cdexp(dci*pha_cor(i))
+          sf(i) = sf(i)*pha_cor(i)*ampdom(i)
+      enddo
+c  forward FFT to get signal envelope
+      call dfftw_plan_dft_1d(plan3,ns,sf,env,
+     *                         FFTW_BACKWARD, FFTW_ESTIMATE)
+      call dfftw_execute(plan3)
+      call dfftw_destroy_plan(plan3)
+      do i =1,ns
+         env(i) = env(i)*dc2/ns
+      enddo
+c cutting impulse response in time
+      dw = om(1)-om(nf)
+
+      call tgauss(fsnr,tg0,t0,dw,dt,ns,fmatch,env,spref)
+      
+c back to spectra after filtering
+      call dfftw_plan_dft_1d(plan4,ns,spref,sf,
+     *                         FFTW_FORWARD, FFTW_ESTIMATE)
+      call dfftw_execute(plan4)
+      call dfftw_destroy_plan(plan4)
+c apply back phase correction for spectra
+      do i = 1,ns
+         sf(i) = sf(i)/pha_cor(i)
+      enddo
+c==================================================================
 c main loop by frequency
       do k = 1,nf
 c filtering
@@ -164,7 +230,7 @@ c spectra ends ajastment
         do m = ns/2+2,ns
           fils(m) = dczero
         enddo
-        fils(1) = fils(1)/2.0d0
+        fils(1) = dcmplx(dreal(fils(1))/2.0d0,0.0d0)
         fils(ns/2+1) = dcmplx(dreal(fils(ns/2+1)),0.0d0)
 c forward FFT: fils ==> tmp
         call dfftw_execute(plan2)
@@ -178,7 +244,7 @@ c extraction from FTAN map area of investigation
           pha(j,k) = datan2(dimag(tmp(m)),dreal(tmp(m)))
           wor = cdabs(tmp(m))
           ampo(j,k) = wor
-          amp(j,k) = 20.0d0*dlog10(wor) 
+          amp(j,k) = 20.0d0*dlog10(wor)
           j = j+1
         enddo
       enddo
@@ -295,8 +361,8 @@ c%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
           grvelt(k) = grvel(k)
           tvist(k)  = tvis(k)
           ampgrt(k) = ampgr(k)
+          ampgrt(k) = ampgr(k)
           phgrt(k)  = phgr(k)
-          snrt(k)   = snr(k)
           wdtht(k)  = wdth(k)
         enddo
         njump = 0
@@ -455,7 +521,7 @@ c%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         arr1(2,i) = tvis(i)
         arr1(3,i) = grvel(i)
         arr1(4,i) = phgr(i)
-        arr1(5,i) = ampgr(i)  
+        arr1(5,i) = ampgr(i)
         arr1(6,i) = ftrig(i)
         arr1(7,i) = snr(i)
         arr1(8,i) = wdth(i)
@@ -475,7 +541,7 @@ ccc Modified to output absolute amplitude, by LF
           arr2(2,i) = tvis1(i)
           arr2(3,i) = grvel1(i)
           arr2(4,i) = phgr1(i)
-          arr2(5,i) = ampgr1(i) 
+          arr2(5,i) = ampgr1(i)
           arr2(6,i) = snr1(i)
           arr2(7,i) = wdth1(i)
 ccc Modified to output absolute amplitude, by LF

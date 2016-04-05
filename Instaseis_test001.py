@@ -3,6 +3,9 @@ import obspy
 import numpy as np
 import noisepy
 import matplotlib.pyplot as plt
+from scipy import stats
+from obspy.io.sac.util import obspy_to_sac_header
+
 Miso=1.0000e+24
 dDelta=1;
 Nsta=30;
@@ -12,8 +15,8 @@ evla=0.0;
 evlo=0.0;
 
 outdir='./instaseis_ftan';
-db = instaseis.open_db("/home/lili/code/10s_PREM_ANI_FORCES")
-
+# db = instaseis.open_db("/home/lili/code/10s_PREM_ANI_FORCES")
+db = instaseis.open_db("/projects/life9360/instaseis_seismogram/10s_PREM_ANI_FORCES")
 source = instaseis.Source(
     latitude=evla, longitude=evlo, depth_in_m=1000,
     m_rr = Miso / 1E7,
@@ -36,12 +39,12 @@ for n in np.arange(Nsta):
         latitude=lat, longitude=lon, network=network, station=staname)
     trZ = db.get_seismograms(source=source, receiver=receiver)[0]
     outfname=outdir+'/'+network+'.'+staname+'.SAC';
-    trZ.stats.sac={}
+    trZ.stats.sac=obspy_to_sac_header(trZ.stats)
     trZ.stats.sac.evlo=evlo
     trZ.stats.sac.evla=evla
     trZ.stats.sac.stlo=stlo
     trZ.stats.sac.stla=stla
-    trZ.stats.sac.b=0;
+    trZ.stats.sac.b= 5.13144111774;
     trZ.stats.sac.e=trZ.stats.npts*trZ.stats.delta;
     dist, az, baz=obspy.geodetics.base.gps2dist_azimuth(evla, evlo, stla, stlo);
     trZ.stats.sac.az=az;
@@ -55,7 +58,7 @@ for n in np.arange(Nsta):
 VgrArr=np.array([]);
 AmpArr=np.array([]);
 DistArr=np.array([]);
-per=20.;
+per=12.;
 for trace in InstaStream:
     staname = str('S%03d' %n)
     lon=n*dDelta+Ni
@@ -94,10 +97,13 @@ for trace in InstaStream:
     
     
 plt.figure();
-# plt.plot(DistArr, VgrArr);
-plt.plot(DistArr, AmpArr*np.sqrt(DistArr));
+plt.plot(DistArr, DistArr/VgrArr, 'x');
+plt.figure();
+plt.plot(DistArr, VgrArr, 'x');
+# plt.plot(DistArr, AmpArr*np.sqrt(DistArr));
 plt.show()
-
+slope, intercept, r_value, p_value, std_err = stats.linregress(DistArr, DistArr/VgrArr);
+print slope, intercept, r_value, p_value, std_err
     
     
     

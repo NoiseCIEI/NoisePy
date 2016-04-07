@@ -126,7 +126,7 @@ c number of FTAN filters
 c automatic width of filters * factor ffact
 ccc     alpha = ffact*20.0d0*dsqrt(delta/1000.0d0) Modified by LF
 ccc     alpha = ffact*20.0d0*dsqrt(delta/1000.0d0) LFLFLF
-      alpha = ffact*20.0d0*dsqrt(100.0d0/1000.0d0)
+      alpha = ffact*20.0d0*dsqrt(1000.0d0/1000.0d0)
 c  number of samples for tapering, left end
       ntapb = nint(taperl*tmax/dt)
 c  number of samples for tapering, right end

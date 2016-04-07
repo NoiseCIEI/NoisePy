@@ -15,18 +15,18 @@ f1='/lustre/janus_scratch/life9360/EA_ses3d_working_dir/OUTPUT_SAC_EA_10sec_1km_
 # f='./instaseis_ftan/LF.S000.SAC'
 # f2='./instaseis_ftan/LF.S000.SAC'
 f='./instaseis_ftan/LF.S000.SAC'
-f2='./instaseis_ftan/LF.S000.SAC'
+# f2='./instaseis_ftan/LF.S000.SAC'
 #prefname='/lustre/janus_scratch/life9360/EA_ses3d_working_dir/OUTPUT_DISP_EA_10sec_1km_001/PREPHASE_R/NKNT.EA123S32.pre'
 prefname='/projects/life9360/code/PRE_PHASE/ALASKA_L/CLCO.N25K.pre'
-# f='/projects/life9360/TA.O11A/COR_TA.O11A_TA.Q21A.SAC_TT_s'
+f='/projects/life9360/code/fk/ak135_15/05.grn.0'
 st=obspy.read(f)
 tr=st[0]
 tr1=npy.noisetrace(tr.data, tr.stats)
 tr1.aftan(piover4=-1., pmf=True, tmin=2.0, tmax=50.0, phvelname=prefname)
-st=obspy.read(f2)
-tr=st[0]
-tr2=npy.noisetrace(tr.data*2., tr.stats)
-tr2.aftan(piover4=-1., pmf=True, tmin=2.0, tmax=50.0, phvelname=prefname)
+# st=obspy.read(f2)
+# tr=st[0]
+# tr2=npy.noisetrace(tr.data*2., tr.stats)
+# tr2.aftan(piover4=-1., pmf=True, tmin=2.0, tmax=50.0, phvelname=prefname)
 # tr1=npy.noisetrace(tr.data, tr.stats)
 # tr1.aftan(piover4=0, pmf=True, tmin=2.0, tmax=50.0, phvelname=prefname)
 # tr1.ftanparam.FTANcomp(tr.ftanparam)
@@ -50,7 +50,7 @@ tr2.aftan(piover4=-1., pmf=True, tmin=2.0, tmax=50.0, phvelname=prefname)
 # V=InAK135Arr[:,1];
 # ax = plt.subplot()
 # ax.plot(T, V, '--g', lw=3);
-# tr.plotftan()
+tr1.plotftan()
 plt.show()
 
 

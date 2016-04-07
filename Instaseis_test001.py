@@ -5,19 +5,20 @@ import noisepy
 import matplotlib.pyplot as plt
 from scipy import stats
 from obspy.io.sac.util import obspy_to_sac_header
-import symData2d
+#import symData2d
 
 Miso=1.0000e+24
 dDelta=1;
-Nsta=20;
-Ni=5;
+Nsta=40;
+Ni=12;
 lat=0;
 evla=0.0;
 evlo=0.0;
 
 outdir='./instaseis_ftan';
 # db = instaseis.open_db("/home/lili/code/10s_PREM_ANI_FORCES")
-db = instaseis.open_db("/projects/life9360/instaseis_seismogram/10s_PREM_ANI_FORCES")
+#db = instaseis.open_db("/projects/life9360/instaseis_seismogram/10s_PREM_ANI_FORCES")
+db = instaseis.open_db("/lustre/janus_scratch/life9360/instaseis_db")
 source = instaseis.Source(
     latitude=evla, longitude=evlo, depth_in_m=1000,
     m_rr = Miso / 1E7,
@@ -47,7 +48,8 @@ for n in np.arange(Nsta):
     trZ.stats.sac.evla=evla
     trZ.stats.sac.stlo=stlo
     trZ.stats.sac.stla=stla
-    trZ.stats.sac.b= 5.13144111774;
+    #trZ.stats.sac.b=7.38470105346
+    trZ.stats.sac.b=-1.53764949208
     trZ.stats.sac.e=trZ.stats.npts*trZ.stats.delta;
     dist, az, baz=obspy.geodetics.base.gps2dist_azimuth(evla, evlo, stla, stlo);
     trZ.stats.sac.az=az;
@@ -104,10 +106,10 @@ for trace in InstaStream:
     
 plt.figure();
 # plt.plot(DistArr, DistArr/VgrArr, 'o');
-# plt.plot(DistArr, VgrArr, 'o');
+#plt.plot(DistArr, VgrArr, 'o');
 plt.plot(DistArr, (VgrArr-VgrArr[0])/VgrArr[0]*100.,'o' );
 plt.ylabel('Relative Difference in Vgr (%)');
-# plt.ylabel('Vgr(km/s)');
+#plt.ylabel('Vgr(km/s)');
 plt.xlabel('Distance(km)');
 
 plt.figure();
@@ -120,13 +122,12 @@ plt.xlabel('Distance(km)');
 plt.figure();
 # plt.plot(DistArr, VgrArr, 'x');
 # plt.plot(DistArr, AmpArr*np.sqrt(np.sin(DeltaArr*np.pi/180.) ));
-# CampArr=AmpArr*np.sqrt(np.sin(DeltaArr*np.pi/180.) )/np.sqrt(np.sin(DeltaArr[0]*np.pi/180.) )
-# CampArr=AmpArr*np.sqrt(DistArr/DistArr[0] )  
+#CampArr=AmpArr*np.sqrt(np.sin(DeltaArr*np.pi/180.) )/np.sqrt(np.sin(DeltaArr[0]*np.pi/180.) )
+#CampArr=AmpArr*np.sqrt(DistArr/DistArr[0] )  
 CampArr=AmpArr*DistArr/ DistArr[0] 
-plt.plot(DistArr, (CampArr-CampArr[0])/CampArr[0]*100.,'o' );
-# plt.plot(DistArr, CampArr,'o' );
-# plt.
-plt.ylabel('Relative Difference in Corrected Amp (%)');
+#plt.plot(DistArr, (CampArr-CampArr[0])/CampArr[0]*100.,'o' );
+plt.plot(DistArr, CampArr,'o' );
+plt.ylabel('Amplitude(nm)');
 plt.xlabel('Distance(km)');
 # plt.axis([ DistArr.min(), DistArr.max(), CampArr.min(), CampArr.max()])
 plt.show()

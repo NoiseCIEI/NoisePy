@@ -16,25 +16,29 @@ evla=0.0;
 evlo=0.0;
 
 fkStream=obspy.Stream();
-fkdatadir='/projects/life9360/code/fk/ak135_Q_15';
-for sacfname in glob.glob(fkdatadir+"/*0"):
+# fkdatadir='./ak135_Q_15';
+fkdatadir='/projects/life9360/code/fk/ak135_Q_15_1'
+for sacfname in glob.glob(fkdatadir+"/??.grn.0"):
     Tr=obspy.read(sacfname)[0];
     Tr.stats.distance=Tr.stats.sac.dist;
+    # Tr.stats.sac.b=3.52536799194+Tr.stats.sac.b
+    # Tr.stats.sac.b=Tr.stats.sac.b-1.99936351
+    # Tr.stats.sac.b=0.47308033251+Tr.stats.sac.b
     fkStream.append(Tr)
 
 DeltaArr=np.array([]);
 VgrArr=np.array([]);
 AmpArr=np.array([]);
 DistArr=np.array([]);
-per=15.;
+per=10.;
 for trace in fkStream:
     nTr=noisepy.noisetrace(trace.data, trace.stats);
     # nTr=symData2d.symtrace(trace.data, trace.stats);
     DistArr=np.append(DistArr, nTr.stats.sac.dist);
     DeltaArr=np.append(DeltaArr, kilometer2degrees(nTr.stats.sac.dist) );
-    nTr.aftan(tmin=5, tmax=30,ffact=10.);
+    nTr.aftan(tmin=5, tmax=70,ffact=10.);
+    # nTr.aftan(tmin=5, tmax=70,ffact=1.);
     # nTr.getSNR();
-    
     a_per = nTr.ftanparam.arr1_1[1,:];
     gv = nTr.ftanparam.arr1_1[2,:];
     pv = nTr.ftanparam.arr1_1[3,:];
@@ -65,21 +69,22 @@ for trace in fkStream:
 minindex=np.argmin(DistArr)
 plt.figure();
 # plt.plot(DistArr, DistArr/VgrArr, 'o');
-# plt.plot(DistArr, VgrArr, 'o');
-plt.plot(DistArr, (VgrArr-VgrArr[minindex])/VgrArr[minindex]*100.,'o' );
-plt.title('original aftan')
-# plt.title('modified aftan')
+plt.plot(DistArr, VgrArr, 'o');
+plt.plot([150, 150], [VgrArr.max(), VgrArr.min()], 'r--', lw=2)
+# plt.plot(DistArr, (VgrArr-VgrArr[minindex])/VgrArr[minindex]*100.,'o' );
+# plt.title('original aftan(10 sec)')
+plt.title('modified aftan(10 sec)')
 
-plt.ylabel('Relative Difference in Vgr (%)');
-# plt.ylabel('Vgr(km/s)');
+# plt.ylabel('Relative Difference in Vgr (%)');
+plt.ylabel('Group Velocity(km/s)');
 plt.xlabel('Distance(km)');
 
 plt.figure();
 # plt.plot(DistArr, VgrArr, 'x');
 # plt.plot(DistArr, AmpArr*np.sqrt(np.sin(DeltaArr*np.pi/180.) ));
 plt.plot(DistArr, AmpArr*1e9,'o' );
-plt.title('original aftan')
-# plt.title('modified aftan')
+# plt.title('original aftan(10 sec)')
+plt.title('modified aftan(10 sec)')
 plt.ylabel('Amplitude(nm)');
 plt.xlabel('Distance(km)');
 
@@ -87,22 +92,20 @@ plt.figure();
 # plt.plot(DistArr, VgrArr, 'x');
 # plt.plot(DistArr, AmpArr*np.sqrt(np.sin(DeltaArr*np.pi/180.) ));
 # CampArr=AmpArr*np.sqrt( np.sin(DeltaArr*np.pi/180.) ) /np.sqrt(np.sin(DeltaArr[minindex]*np.pi/180.) )
-# CampArr=AmpArr*np.sqrt(DistArr/DistArr[minindex] )
+CampArr=AmpArr*np.sqrt(DistArr/DistArr[minindex] )
 # CampArr=AmpArr*np.sin(DeltaArr*np.pi/180.)  /np.sin(DeltaArr[0]*np.pi/180.) 
-CampArr=AmpArr*DistArr/ DistArr[minindex]
+# CampArr=AmpArr*DistArr/ DistArr[minindex]
 # CampArr=AmpArr*(DistArr/ DistArr[0])**(0.8)
 plt.plot(DistArr, (CampArr-CampArr[minindex])/CampArr[minindex]*100.,'o' );
 # plt.plot(DistArr, CampArr,'o' );
-plt.title('original aftan')
-# plt.title('modified aftan')
+# plt.title('original aftan(10 sec)')
+plt.title('modified aftan(10 sec)')
 plt.ylabel('Relative Difference in Corrected Amp (%)');
 plt.xlabel('Distance(km)');
-
-
 # plt.axis([ DistArr.min(), DistArr.max(), CampArr.min(), CampArr.max()])
 plt.show()
-# slope, intercept, r_value, p_value, std_err = stats.linregress(DistArr, DistArr/VgrArr);
-slope, intercept, r_value, p_value, std_err = stats.linregress(DistArr, CampArr*1e9);
+slope, intercept, r_value, p_value, std_err = stats.linregress(DistArr, DistArr/VgrArr);
+# slope, intercept, r_value, p_value, std_err = stats.linregress(DistArr, CampArr*1e9);
 print slope, intercept, r_value, p_value, std_err
     
     

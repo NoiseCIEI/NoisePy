@@ -47,11 +47,13 @@ import numexpr as npr
 from functools import partial
 import multiprocessing as mp
 import math
-try:
-    import fftw3 # pyfftw3-0.2
-    useFFTW=True;
-except:
-    useFFTW=False;
+
+# try:
+#     import fftw3 # pyfftw3-0.2
+#     useFFTW=True;
+# except:
+#     useFFTW=False;
+useFFTW=False;
 import time
 import shutil
 # import CURefPy as ref # Comment this line if you do not have CURefPy
@@ -450,9 +452,11 @@ class noisetrace(obspy.core.trace.Trace):
         except:
             self.init_ftanParam()
         try:
-            dist=self.stats.sac.dist;
+            dist=self.stats.sac.dist
         except:
-            dist=self.stats.distance;
+            dist, az, baz=obsGeo.base.gps2dist_azimuth(self.stats.sac.evla, self.stats.sac.evlo, self.stats.sac.stla, self.stats.sac.stlo ) # distance is in m
+            dist=dist/1000.
+            self.stats.sac.dist=dist
         if (phvelname==''):
             phvelname='./ak135.disp';
         nprpv = 0
@@ -484,10 +488,6 @@ class noisetrace(obspy.core.trace.Trace):
             sig=np.append(tempsac.data,np.zeros( float(32768-tempsac.data.size) ) )
             nsam=int( float (tempsac.stats.npts) )### for unknown reasons, this has to be done, nsam=int(tempsac.stats.npts)  won't work as an input for aftan
         dt=tempsac.stats.delta
-        try:
-            dist=tempsac.stats.sac.dist;
-        except:
-            dist=tempsac.stats.distance;
         # Start to do aftan utilizing pyaftan
         self.ftanparam.nfout1_1,self.ftanparam.arr1_1,self.ftanparam.nfout2_1,self.ftanparam.arr2_1,self.ftanparam.tamp_1,\
         self.ftanparam.nrow_1,self.ftanparam.ncol_1,self.ftanparam.ampo_1, self.ftanparam.ierr_1= ftan.aftanpg(piover4, nsam, \
@@ -636,133 +636,133 @@ class noisetrace(obspy.core.trace.Trace):
         sacname - sac file name than can be used as the title of the figure
         -----------------------------------------------------------------------------------------------------
         """
-        try:
-            fparam=self.ftanparam
-            if fparam.nfout1_1==0:
-                return "Error: No Basic FTAN parameters!"
-            dt=self.stats.delta
-            dist=self.stats.sac.dist
-            if (plotflag!=1 and plotflag!=3):
-                v1=dist/(fparam.tamp_1+np.arange(fparam.ncol_1)*dt)
-                ampo_1=fparam.ampo_1[:fparam.ncol_1,:fparam.nrow_1]
-                obper1_1=fparam.arr1_1[1,:fparam.nfout1_1]
-                gvel1_1=fparam.arr1_1[2,:fparam.nfout1_1]
-                phvel1_1=fparam.arr1_1[3,:fparam.nfout1_1]
-                plb.figure()
-                ax = plt.subplot()
-                p=plt.pcolormesh(obper1_1, v1, ampo_1, cmap='gist_rainbow',shading='gouraud')
-                ax.plot(obper1_1, gvel1_1, '--k', lw=3) #
+        # try:
+        fparam=self.ftanparam
+        if fparam.nfout1_1==0:
+            return "Error: No Basic FTAN parameters!"
+        dt=self.stats.delta
+        dist=self.stats.sac.dist
+        if (plotflag!=1 and plotflag!=3):
+            v1=dist/(fparam.tamp_1+np.arange(fparam.ncol_1)*dt)
+            ampo_1=fparam.ampo_1[:fparam.ncol_1,:fparam.nrow_1]
+            obper1_1=fparam.arr1_1[1,:fparam.nfout1_1]
+            gvel1_1=fparam.arr1_1[2,:fparam.nfout1_1]
+            phvel1_1=fparam.arr1_1[3,:fparam.nfout1_1]
+            plb.figure()
+            ax = plt.subplot()
+            p=plt.pcolormesh(obper1_1, v1, ampo_1, cmap='gist_rainbow',shading='gouraud')
+            ax.plot(obper1_1, gvel1_1, '--k', lw=3) #
+            if (fparam.preflag==True):
+                ax.plot(obper1_1, phvel1_1, '--w', lw=3) #
+
+            if (fparam.nfout2_1!=0):
+                obper2_1=fparam.arr2_1[1,:fparam.nfout2_1]
+                gvel2_1=fparam.arr2_1[2,:fparam.nfout2_1]
+                phvel2_1=fparam.arr2_1[3,:fparam.nfout2_1]
+                ax.plot(obper2_1, gvel2_1, '-k', lw=3) #
                 if (fparam.preflag==True):
-                    ax.plot(obper1_1, phvel1_1, '--w', lw=3) #
+                    ax.plot(obper2_1, phvel2_1, '-w', lw=3) #
+            cb = plt.colorbar(p, ax=ax)
+            Tmin1=obper1_1[0]
+            Tmax1=obper1_1[fparam.nfout1_1-1]
+            vmin1= v1[fparam.ncol_1-1]
+            vmax1=v1[0]
+            plt.axis([Tmin1, Tmax1, vmin1, vmax1])
+            plt.xlabel('Period(s)')
+            plt.ylabel('Velocity(km/s)')
+            plt.title('Basic FTAN Diagram '+sacname,fontsize=15)
 
-                if (fparam.nfout2_1!=0):
-                    obper2_1=fparam.arr2_1[1,:fparam.nfout2_1]
-                    gvel2_1=fparam.arr2_1[2,:fparam.nfout2_1]
-                    phvel2_1=fparam.arr2_1[3,:fparam.nfout2_1]
-                    ax.plot(obper2_1, gvel2_1, '-k', lw=3) #
-                    if (fparam.preflag==True):
-                        ax.plot(obper2_1, phvel2_1, '-w', lw=3) #
-                cb = plt.colorbar(p, ax=ax)
-                Tmin1=obper1_1[0]
-                Tmax1=obper1_1[fparam.nfout1_1-1]
-                vmin1= v1[fparam.ncol_1-1]
-                vmax1=v1[0]
-                plt.axis([Tmin1, Tmax1, vmin1, vmax1])
-                plt.xlabel('Period(s)')
-                plt.ylabel('Velocity(km/s)')
-                plt.title('Basic FTAN Diagram '+sacname,fontsize=15)
+        if fparam.nfout1_2==0 and plotflag!=0:
+            return "Error: No PMF FTAN parameters!"
+        if (plotflag!=0 and plotflag!=3):
+            v2=dist/(fparam.tamp_2+np.arange(fparam.ncol_2)*dt)
+            ampo_2=fparam.ampo_2[:fparam.ncol_2,:fparam.nrow_2]
+            obper1_2=fparam.arr1_2[1,:fparam.nfout1_2]
+            gvel1_2=fparam.arr1_2[2,:fparam.nfout1_2]
+            phvel1_2=fparam.arr1_2[3,:fparam.nfout1_2]
+            plb.figure()
+            ax = plt.subplot()
+            p=plt.pcolormesh(obper1_2, v2, ampo_2, cmap='gist_rainbow',shading='gouraud')
+            ax.plot(obper1_2, gvel1_2, '--k', lw=3) #
+            if (fparam.preflag==True):
+                ax.plot(obper1_2, phvel1_2, '--w', lw=3) #
 
-            if fparam.nfout1_2==0 and plotflag!=0:
-                return "Error: No PMF FTAN parameters!"
-            if (plotflag!=0 and plotflag!=3):
-                v2=dist/(fparam.tamp_2+np.arange(fparam.ncol_2)*dt)
-                ampo_2=fparam.ampo_2[:fparam.ncol_2,:fparam.nrow_2]
-                obper1_2=fparam.arr1_2[1,:fparam.nfout1_2]
-                gvel1_2=fparam.arr1_2[2,:fparam.nfout1_2]
-                phvel1_2=fparam.arr1_2[3,:fparam.nfout1_2]
-                plb.figure()
-                ax = plt.subplot()
-                p=plt.pcolormesh(obper1_2, v2, ampo_2, cmap='gist_rainbow',shading='gouraud')
-                ax.plot(obper1_2, gvel1_2, '--k', lw=3) #
+            if (fparam.nfout2_2!=0):
+                obper2_2=fparam.arr2_2[1,:fparam.nfout2_2]
+                gvel2_2=fparam.arr2_2[2,:fparam.nfout2_2]
+                phvel2_2=fparam.arr2_2[3,:fparam.nfout2_2]
+                ax.plot(obper2_2, gvel2_2, '-k', lw=3) #
                 if (fparam.preflag==True):
-                    ax.plot(obper1_2, phvel1_2, '--w', lw=3) #
+                    ax.plot(obper2_2, phvel2_2, '-w', lw=3) #
+            cb = plt.colorbar(p, ax=ax)
+            Tmin2=obper1_2[0]
+            Tmax2=obper1_2[fparam.nfout1_2-1]
+            vmin2= v2[fparam.ncol_2-1]
+            vmax2=v2[0]
+            plt.axis([Tmin2, Tmax2, vmin2, vmax2])
+            plt.xlabel('Period(s)')
+            plt.ylabel('Velocity(km/s)')
+            plt.title('PMF FTAN Diagram '+sacname,fontsize=15)
 
-                if (fparam.nfout2_2!=0):
-                    obper2_2=fparam.arr2_2[1,:fparam.nfout2_2]
-                    gvel2_2=fparam.arr2_2[2,:fparam.nfout2_2]
-                    phvel2_2=fparam.arr2_2[3,:fparam.nfout2_2]
-                    ax.plot(obper2_2, gvel2_2, '-k', lw=3) #
-                    if (fparam.preflag==True):
-                        ax.plot(obper2_2, phvel2_2, '-w', lw=3) #
-                cb = plt.colorbar(p, ax=ax)
-                Tmin2=obper1_2[0]
-                Tmax2=obper1_2[fparam.nfout1_2-1]
-                vmin2= v2[fparam.ncol_2-1]
-                vmax2=v2[0]
-                plt.axis([Tmin2, Tmax2, vmin2, vmax2])
-                plt.xlabel('Period(s)')
-                plt.ylabel('Velocity(km/s)')
-                plt.title('PMF FTAN Diagram '+sacname,fontsize=15)
-
-            if ( plotflag==3 ):
-                v1=dist/(fparam.tamp_1+np.arange(fparam.ncol_1)*dt)
-                ampo_1=fparam.ampo_1[:fparam.ncol_1,:fparam.nrow_1]
-                obper1_1=fparam.arr1_1[1,:fparam.nfout1_1]
-                gvel1_1=fparam.arr1_1[2,:fparam.nfout1_1]
-                phvel1_1=fparam.arr1_1[3,:fparam.nfout1_1]
-                plb.figure(num=None, figsize=(18, 16), dpi=80, facecolor='w', edgecolor='k')
-                ax = plt.subplot(2,1,1)
-                p=plt.pcolormesh(obper1_1, v1, ampo_1, cmap='gist_rainbow',shading='gouraud')
-                ax.plot(obper1_1, gvel1_1, '--k', lw=3) #
+        if ( plotflag==3 ):
+            v1=dist/(fparam.tamp_1+np.arange(fparam.ncol_1)*dt)
+            ampo_1=fparam.ampo_1[:fparam.ncol_1,:fparam.nrow_1]
+            obper1_1=fparam.arr1_1[1,:fparam.nfout1_1]
+            gvel1_1=fparam.arr1_1[2,:fparam.nfout1_1]
+            phvel1_1=fparam.arr1_1[3,:fparam.nfout1_1]
+            plb.figure(num=None, figsize=(18, 16), dpi=80, facecolor='w', edgecolor='k')
+            ax = plt.subplot(2,1,1)
+            p=plt.pcolormesh(obper1_1, v1, ampo_1, cmap='gist_rainbow',shading='gouraud')
+            ax.plot(obper1_1, gvel1_1, '--k', lw=3) #
+            if (fparam.preflag==True):
+                ax.plot(obper1_1, phvel1_1, '--w', lw=3) #
+            if (fparam.nfout2_1!=0):
+                obper2_1=fparam.arr2_1[1,:fparam.nfout2_1]
+                gvel2_1=fparam.arr2_1[2,:fparam.nfout2_1]
+                phvel2_1=fparam.arr2_1[3,:fparam.nfout2_1]
+                ax.plot(obper2_1, gvel2_1, '-k', lw=3) #
                 if (fparam.preflag==True):
-                    ax.plot(obper1_1, phvel1_1, '--w', lw=3) #
-                if (fparam.nfout2_1!=0):
-                    obper2_1=fparam.arr2_1[1,:fparam.nfout2_1]
-                    gvel2_1=fparam.arr2_1[2,:fparam.nfout2_1]
-                    phvel2_1=fparam.arr2_1[3,:fparam.nfout2_1]
-                    ax.plot(obper2_1, gvel2_1, '-k', lw=3) #
-                    if (fparam.preflag==True):
-                        ax.plot(obper2_1, phvel2_1, '-w', lw=3) #
-                cb = plt.colorbar(p, ax=ax)
-                Tmin1=obper1_1[0]
-                Tmax1=obper1_1[fparam.nfout1_1-1]
-                vmin1= v1[fparam.ncol_1-1]
-                vmax1=v1[0]
-                plt.axis([Tmin1, Tmax1, vmin1, vmax1])
-                plt.xlabel('Period(s)')
-                plt.ylabel('Velocity(km/s)')
-                plt.title('Basic FTAN Diagram '+sacname)
+                    ax.plot(obper2_1, phvel2_1, '-w', lw=3) #
+            cb = plt.colorbar(p, ax=ax)
+            Tmin1=obper1_1[0]
+            Tmax1=obper1_1[fparam.nfout1_1-1]
+            vmin1= v1[fparam.ncol_1-1]
+            vmax1=v1[0]
+            plt.axis([Tmin1, Tmax1, vmin1, vmax1])
+            plt.xlabel('Period(s)')
+            plt.ylabel('Velocity(km/s)')
+            plt.title('Basic FTAN Diagram '+sacname)
 
-                v2=dist/(fparam.tamp_2+np.arange(fparam.ncol_2)*dt)
-                ampo_2=fparam.ampo_2[:fparam.ncol_2,:fparam.nrow_2]
-                obper1_2=fparam.arr1_2[1,:fparam.nfout1_2]
-                gvel1_2=fparam.arr1_2[2,:fparam.nfout1_2]
-                phvel1_2=fparam.arr1_2[3,:fparam.nfout1_2]
+            v2=dist/(fparam.tamp_2+np.arange(fparam.ncol_2)*dt)
+            ampo_2=fparam.ampo_2[:fparam.ncol_2,:fparam.nrow_2]
+            obper1_2=fparam.arr1_2[1,:fparam.nfout1_2]
+            gvel1_2=fparam.arr1_2[2,:fparam.nfout1_2]
+            phvel1_2=fparam.arr1_2[3,:fparam.nfout1_2]
 
-                ax = plt.subplot(2,1,2)
-                p=plt.pcolormesh(obper1_2, v2, ampo_2, cmap='gist_rainbow',shading='gouraud')
-                ax.plot(obper1_2, gvel1_2, '--k', lw=3) #
+            ax = plt.subplot(2,1,2)
+            p=plt.pcolormesh(obper1_2, v2, ampo_2, cmap='gist_rainbow',shading='gouraud')
+            ax.plot(obper1_2, gvel1_2, '--k', lw=3) #
+            if (fparam.preflag==True):
+                ax.plot(obper1_2, phvel1_2, '--w', lw=3) #
+
+            if (fparam.nfout2_2!=0):
+                obper2_2=fparam.arr2_2[1,:fparam.nfout2_2]
+                gvel2_2=fparam.arr2_2[2,:fparam.nfout2_2]
+                phvel2_2=fparam.arr2_2[3,:fparam.nfout2_2]
+                ax.plot(obper2_2, gvel2_2, '-k', lw=3) #
                 if (fparam.preflag==True):
-                    ax.plot(obper1_2, phvel1_2, '--w', lw=3) #
-
-                if (fparam.nfout2_2!=0):
-                    obper2_2=fparam.arr2_2[1,:fparam.nfout2_2]
-                    gvel2_2=fparam.arr2_2[2,:fparam.nfout2_2]
-                    phvel2_2=fparam.arr2_2[3,:fparam.nfout2_2]
-                    ax.plot(obper2_2, gvel2_2, '-k', lw=3) #
-                    if (fparam.preflag==True):
-                        ax.plot(obper2_2, phvel2_2, '-w', lw=3) #
-                cb = plt.colorbar(p, ax=ax)
-                Tmin2=obper1_2[0]
-                Tmax2=obper1_2[fparam.nfout1_2-1]
-                vmin2= v2[fparam.ncol_2-1]
-                vmax2=v2[0]
-                plt.axis([Tmin2, Tmax2, vmin2, vmax2])
-                plt.xlabel('Period(s)')
-                plt.ylabel('Velocity(km/s)')
-                plt.title('PMF FTAN Diagram '+sacname)
-        except AttributeError:
-            print 'Error: FTAN Parameters are not available!'
+                    ax.plot(obper2_2, phvel2_2, '-w', lw=3) #
+            cb = plt.colorbar(p, ax=ax)
+            Tmin2=obper1_2[0]
+            Tmax2=obper1_2[fparam.nfout1_2-1]
+            vmin2= v2[fparam.ncol_2-1]
+            vmax2=v2[0]
+            plt.axis([Tmin2, Tmax2, vmin2, vmax2])
+            plt.xlabel('Period(s)')
+            plt.ylabel('Velocity(km/s)')
+            plt.title('PMF FTAN Diagram '+sacname)
+        # except AttributeError:
+        #     print 'Error: FTAN Parameters are not available!'
         return
 
     def GaussianFilter(self, fcenter, fhlen=0.008):

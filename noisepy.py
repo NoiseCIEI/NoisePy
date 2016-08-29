@@ -1813,7 +1813,6 @@ class StaInfo(object):
                         marker_E=0;
                     else:
                         marker_E=1;
-    
                     if lat2-lat<0:
                         marker_N=0;
                     else:

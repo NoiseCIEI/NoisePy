@@ -1,3 +1,30 @@
+# -*- coding: utf-8 -*-
+"""
+A python module for seismic data analysis based on ASDF database
+
+:Methods:
+    aftan analysis (use pyaftan or aftanf77)
+    C3(Correlation of coda of Cross-Correlation) computation
+    python wrapper for Barmin's surface wave tomography Code
+    Automatic Receiver Function Analysis( Iterative Deconvolution and Harmonic Stripping )
+    Eikonal Tomography
+    Helmholtz Tomography 
+    Stacking/Rotation for Cross-Correlation Results from SEED2CORpp
+    Bayesian Monte Carlo Inversion of Surface Wave and Receiver Function datasets (To be added soon)
+
+:Dependencies:
+    numpy >=1.9.1
+    scipy >=0.18.0
+    matplotlib >=1.4.3
+    ObsPy >=1.0.1
+    pyfftw 0.10.3 (optional)
+    
+:Copyright:
+    Author: Lili Feng
+    Graduate Research Assistant
+    CIEI, Department of Physics, University of Colorado Boulder
+    email: lili.feng@colorado.edu
+"""
 import pyasdf
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,7 +35,9 @@ import os, shutil
 import numba
 from functools import partial
 import multiprocessing
-
+import pyaftan
+from subprocess import call
+from obspy.clients.fdsn.client import Client
 
 sta_info_default={'rec_func': 0, 'xcorr': 1, 'isnet': 0}
 
@@ -158,6 +187,17 @@ class noiseASDF(pyasdf.ASDFDataSet):
         return
     
     def wsac_xcorr_all(self, netcode1, stacode1, netcode2, stacode2, outdir='.', pfx='COR'):
+        """Write all components of cross-correlation data from ASDF to sac file
+        ==============================================================================
+        Input Parameters:
+        netcode1, stacode1  - network/station name for station 1
+        netcode2, stacode2  - network/station name for station 2
+        outdir              - output directory
+        pfx                 - prefix
+        Output:
+        e.g. outdir/COR/TA.G12A/COR_TA.G12A_BHT_TA.R21A_BHT.SAC
+        ==============================================================================
+        """
         subdset=self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2]
         channels1=subdset.list()
         channels2=subdset[channels1[0]].list()
@@ -167,9 +207,55 @@ class noiseASDF(pyasdf.ASDFDataSet):
                     stacode2=stacode2, chan1=chan1, chan2=chan2, outdir=outdir, pfx=pfx)
         return
     
-    def xcorr_stack(self, datadir, startyear, startmonth, endyear, endmonth, pfx='COR', chantype=1, outdir=None, inchannels=None, fnametype='LF'):
+    def get_xcorr_trace(self, netcode1, stacode1, netcode2, stacode2, chan1, chan2):
+        subdset=self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2][chan1][chan2]
+        evla, evz, evlo=self.waveforms[netcode1+'.'+stacode1].coordinates.values()
+        stla, stz, stlo=self.waveforms[netcode2+'.'+stacode2].coordinates.values()
+        tr=obspy.core.Trace()
+        tr.data=subdset.data.value
+        tr.stats.sac={}
+        tr.stats.sac.evla=evla
+        tr.stats.sac.evlo=evlo
+        tr.stats.sac.stla=stla
+        tr.stats.sac.stlo=stlo
+        tr.stats.sac.kuser0=netcode1
+        tr.stats.sac.kevnm=stacode1
+        tr.stats.network=netcode2
+        tr.stats.station=stacode2
+        # tr.stats.sac.knetwk=netcode2
+        # tr.stats.sac.kstnm=stacode2
+        tr.stats.sac.kcmpnm=chan1+chan2
+        tr.stats.sac.dist=subdset.parameters['dist']
+        tr.stats.sac.az=subdset.parameters['az']
+        tr.stats.sac.baz=subdset.parameters['baz']
+        tr.stats.sac.b=subdset.parameters['b']
+        tr.stats.sac.e=subdset.parameters['e']
+        tr.stats.sac.user0=subdset.parameters['stackday']
+        tr.stats.delta=subdset.parameters['delta']
+        return tr
+        
+        
+    
+    def xcorr_stack(self, datadir, startyear, startmonth, endyear, endmonth, pfx='COR', outdir=None, inchannels=None, fnametype=1):
         """Stack cross-correlation data from monthly-stacked sac files
+        ===========================================================================================================
+        Input Parameters:
+        datadir                 - data directory
+        startyear, startmonth   - start date for stacking
+        endyear, endmonth       - end date for stacking
+        pfx                     - prefix
+        outdir                  - output directory (None is not to save sac files)
+        inchannels              - input channels, if None, will read channel information from obspy inventory
+        fnametype               - input sac file name type
+                                    =1: datadir/COR/G12A/COR_G12A_BHZ_R21A_BHZ.SAC
+                                    =2: datadir/COR/G12A/COR_G12A_R21A.SAC
+        -----------------------------------------------------------------------------------------------------------
+        Output:
+        ASDF path           : self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2][chan1][chan2]
+        sac file(optional)  : outdir/COR/TA.G12A/COR_TA.G12A_BHT_TA.R21A_BHT.SAC
+        ===========================================================================================================
         """
+        # prepare year/month list for stacking
         utcdate=obspy.core.utcdatetime.UTCDateTime(startyear, startmonth, 1)
         ylst=np.array([], dtype=int)
         mlst=np.array([], dtype=int)
@@ -182,6 +268,7 @@ class noiseASDF(pyasdf.ASDFDataSet):
                 utcdate.year+=1
                 utcdate.month=1
         mnumb=mlst.size
+        # determine channels if inchannels is specified
         if inchannels!=None:
             try:
                 if not isinstance(inchannels[0], obspy.core.inventory.channel.Channel):
@@ -194,11 +281,12 @@ class noiseASDF(pyasdf.ASDFDataSet):
             except:
                 inchannels=None
         if inchannels==None:
-            fnametype=='LF'
+            fnametype==1
         else:
             if len(channels)!=1:
-                fnametype=='LF'
+                fnametype==1
         staLst=self.waveforms.list()
+        # main loop for station pairs
         for staid1 in staLst:
             for staid2 in staLst:
                 netcode1, stacode1=staid1.split('.')
@@ -222,9 +310,9 @@ class noiseASDF(pyasdf.ASDFDataSet):
                         for chan2 in channels2:
                             month=monthdict[mlst[im]]
                             yrmonth=str(ylst[im])+'.'+month
-                            if fnametype=='LF':
+                            if fnametype==1:
                                 fname=datadir+'/'+yrmonth+'/'+pfx+'/'+stacode1+'/'+pfx+'_'+stacode1+'_'+chan1.code+'_'+stacode2+'_'+chan2.code+'.SAC'
-                            elif fnametype=='YT':
+                            elif fnametype==2:
                                 fname=datadir+'/'+yrmonth+'/'+pfx+'/'+stacode1+'/'+pfx+'_'+stacode1+'_'+stacode2+'.SAC'
                             if not os.path.isfile(fname):
                                 skipflag=True
@@ -263,8 +351,8 @@ class noiseASDF(pyasdf.ASDFDataSet):
                     xcorr_header['e']=stackedST[0].stats.sac.e
                     xcorr_header['netcode1']=netcode1
                     xcorr_header['netcode2']=netcode2
-                    xcorr_header['stacode1']=netcode1
-                    xcorr_header['stacode2']=netcode1
+                    xcorr_header['stacode1']=stacode1
+                    xcorr_header['stacode2']=stacode2
                     xcorr_header['npts']=stackedST[0].stats.npts
                     xcorr_header['delta']=stackedST[0].stats.delta
                     xcorr_header['stackday']=stackedST[0].stats.sac.user0
@@ -298,8 +386,27 @@ class noiseASDF(pyasdf.ASDFDataSet):
         return
     
     def xcorr_stack_mp(self, datadir, outdir, startyear, startmonth, endyear, endmonth,
-                    pfx='COR', inchannels=None, fnametype='LF', subsize=1000, deletesac=True):
-        
+                    pfx='COR', inchannels=None, fnametype=1, subsize=1000, deletesac=True):
+        """Stack cross-correlation data from monthly-stacked sac files with multiprocessing
+        ===========================================================================================================
+        Input Parameters:
+        datadir                 - data directory
+        outdir                  - output directory 
+        startyear, startmonth   - start date for stacking
+        endyear, endmonth       - end date for stacking
+        pfx                     - prefix
+        inchannels              - input channels, if None, will read channel information from obspy inventory
+        fnametype               - input sac file name type
+                                    =1: datadir/COR/G12A/COR_G12A_BHZ_R21A_BHZ.SAC
+                                    =2: datadir/COR/G12A/COR_G12A_R21A.SAC
+        subsize                 - subsize of processing list, use to prevent lock in multiprocessing process
+        deletesac               - delete output sac files
+        -----------------------------------------------------------------------------------------------------------
+        Output:
+        ASDF path           : self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2][chan1][chan2]
+        sac file(optional)  : outdir/COR/TA.G12A/COR_TA.G12A_BHT_TA.R21A_BHT.SAC
+        ===========================================================================================================
+        """
         utcdate=obspy.core.utcdatetime.UTCDateTime(startyear, startmonth, 1)
         ylst=np.array([], dtype=int)
         mlst=np.array([], dtype=int)
@@ -326,10 +433,10 @@ class noiseASDF(pyasdf.ASDFDataSet):
             except:
                 inchannels=None
         if inchannels==None:
-            fnametype=='LF'
+            fnametype==1
         else:
             if len(channels)!=1:
-                fnametype=='LF'
+                fnametype==1
         stapairInvLst=[]
         for staid1 in staLst:
             if not os.path.isdir(outdir+'/'+pfx+'/'+staid1):
@@ -339,12 +446,12 @@ class noiseASDF(pyasdf.ASDFDataSet):
                 netcode2, stacode2=staid2.split('.')
                 if stacode1 >= stacode2:
                     continue
-                inv = self.waveforms[staid1].StationXML+self.waveforms[staid2].StationXML
+                inv = self.waveforms[staid1].StationXML + self.waveforms[staid2].StationXML
                 if inchannels!=None:
                     inv.networks[0].stations[0].channels=channels
                     inv.networks[1].stations[0].channels=channels
                 stapairInvLst.append(inv) 
-        print 'Start stacking (MP)!'
+        print 'Start multiprocessing stacking !'
         if len(stapairInvLst) > subsize:
             Nsub = int(len(stapairInvLst)/subsize)
             for isub in xrange(Nsub):
@@ -352,22 +459,22 @@ class noiseASDF(pyasdf.ASDFDataSet):
                 cstapairs=stapairInvLst[isub*subsize:(isub+1)*subsize]
                 STACKING = partial(stack4mp, datadir=datadir, outdir=outdir, ylst=ylst, mlst=mlst, pfx=pfx, fnametype=fnametype)
                 pool = multiprocessing.Pool()
-                pool.map_async(STACKING, cstapairs) #make our results with a map call
+                pool.map(STACKING, cstapairs) #make our results with a map call
                 pool.close() #we are not adding any more processes
                 pool.join() #tell it to wait until all threads are done before going on
             cstapairs=stapairInvLst[(isub+1)*subsize:]
             STACKING = partial(stack4mp, datadir=datadir, outdir=outdir, ylst=ylst, mlst=mlst, pfx=pfx, fnametype=fnametype)
             pool = multiprocessing.Pool()
-            pool.map_async(STACKING, cstapairs) 
+            pool.map(STACKING, cstapairs) 
             pool.close() 
             pool.join() 
         else:
             STACKING = partial(stack4mp, datadir=datadir, outdir=outdir, ylst=ylst, mlst=mlst, pfx=pfx, fnametype=fnametype)
             pool = multiprocessing.Pool()
-            pool.map_async(STACKING, stapairInvLst) 
+            pool.map(STACKING, stapairInvLst) 
             pool.close() 
             pool.join() 
-        print 'End of stacking  ( MP ) !'
+        print 'End of multiprocessing stacking !'
         print 'Reading data into ASDF database'
         for inv in stapairInvLst:
             channels1=inv.networks[0].stations[0].channels
@@ -415,7 +522,7 @@ class noiseASDF(pyasdf.ASDFDataSet):
                         xcorr_header['chan2']=chan2.code
                         self.add_auxiliary_data(data=tr.data, data_type='NoiseXcorr', path=staid_aux+'/'+chan1.code+'/'+chan2.code, parameters=xcorr_header)
                     except IOError:
-                        skipflag==True
+                        skipflag=True
                         break
         if deletesac:
             shutil.rmtree(outdir+'/'+pfx)
@@ -423,6 +530,17 @@ class noiseASDF(pyasdf.ASDFDataSet):
         return
                     
     def xcorr_rotation(self, outdir=None, pfx='COR'):
+        """Rotate cross-correlation data 
+        ===========================================================================================================
+        Input Parameters:
+        outdir                  - output directory for sac files (None is not to write)
+        pfx                     - prefix
+        -----------------------------------------------------------------------------------------------------------
+        Output:
+        ASDF path           : self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2][chan1][chan2]
+        sac file(optional)  : outdir/COR/TA.G12A/COR_TA.G12A_BHT_TA.R21A_BHT.SAC
+        ===========================================================================================================
+        """
         staLst=self.waveforms.list()
         for staid1 in staLst:
             for staid2 in staLst:
@@ -437,19 +555,13 @@ class noiseASDF(pyasdf.ASDFDataSet):
                     cpfx1=channels1[0][:2]
                     cpfx2=channels2[0][:2]
                     for chan in channels1:
-                        if chan[2]=='E':
-                            chan1E=chan
-                        if chan[2]=='N':
-                            chan1N=chan
-                        if chan[2]=='Z':
-                            chan1Z=chan
+                        if chan[2]=='E': chan1E=chan
+                        if chan[2]=='N': chan1N=chan
+                        if chan[2]=='Z': chan1Z=chan
                     for chan in channels2:
-                        if chan[2]=='E':
-                            chan2E=chan
-                        if chan[2]=='N':
-                            chan2N=chan
-                        if chan[2]=='Z':
-                            chan2Z=chan
+                        if chan[2]=='E': chan2E=chan
+                        if chan[2]=='N': chan2N=chan
+                        if chan[2]=='Z': chan2Z=chan
                 except AttributeError:
                     continue
                 subdset=self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2]
@@ -473,10 +585,13 @@ class noiseASDF(pyasdf.ASDFDataSet):
                 Spsi=np.sin(np.pi*psi/180.)
                 tempTT=-Ctheta*Cpsi*dsetEE.data.value+Ctheta*Spsi*dsetEN.data.value - \
                     Stheta*Spsi*dsetNN.data.value + Stheta*Cpsi*dsetNE.data.value
+                
                 tempRR=- Stheta*Spsi*dsetEE.data.value - Stheta*Cpsi*dsetEN.data.value \
                     - Ctheta*Cpsi*dsetNN.data.value - Ctheta*Spsi*dsetNE.data.value
+                
                 tempTR=-Ctheta*Spsi*dsetEE.data.value - Ctheta*Cpsi*dsetEN.data.value  \
                     + Stheta*Cpsi*dsetNN.data.value + Stheta*Spsi*dsetNE.data.value
+                
                 tempRT=-Stheta*Cpsi*dsetEE.data.value +Stheta*Spsi*dsetEN.data.value \
                     + Ctheta*Spsi*dsetNN.data.value - Ctheta*Cpsi*dsetNE.data.value
                 staid_aux=netcode1+'/'+stacode1+'/'+netcode2+'/'+stacode2
@@ -513,28 +628,366 @@ class noiseASDF(pyasdf.ASDFDataSet):
                     tempZT =  Spsi*dsetZN.data.value - Cpsi*dsetZE.data.value
                     temp_header['chan1']=chan1R; temp_header['chan2']=chan2Z
                     self.add_auxiliary_data(data=tempRZ, data_type='NoiseXcorr', path=staid_aux+'/'+chan1R+'/'+chan2Z, parameters=temp_header)
-                    
                     temp_header['chan1']=chan1Z; temp_header['chan2']=chan2R
                     self.add_auxiliary_data(data=tempZR, data_type='NoiseXcorr', path=staid_aux+'/'+chan1Z+'/'+chan2R, parameters=temp_header)
-                    
                     temp_header['chan1']=chan1T; temp_header['chan2']=chan2Z
                     self.add_auxiliary_data(data=tempTZ, data_type='NoiseXcorr', path=staid_aux+'/'+chan1T+'/'+chan2Z, parameters=temp_header)
-                    
                     temp_header['chan1']=chan1Z; temp_header['chan2']=chan2T
                     self.add_auxiliary_data(data=tempZT, data_type='NoiseXcorr', path=staid_aux+'/'+chan1Z+'/'+chan2T, parameters=temp_header)
                     # write to sac files
                     if outdir!=None:
                         self.wsac_xcorr(netcode1=netcode1, stacode1=stacode1, netcode2=netcode2,
-                                stacode2=stacode2, chan1=chan1Z, chan2=chan2R, outdir=outdir, pfx=pfx)
+                                stacode2=stacode2, chan1=chan1R, chan2=chan2Z, outdir=outdir, pfx=pfx)                        
                         self.wsac_xcorr(netcode1=netcode1, stacode1=stacode1, netcode2=netcode2,
-                                stacode2=stacode2, chan1=chan1R, chan2=chan2Z, outdir=outdir, pfx=pfx)
+                                stacode2=stacode2, chan1=chan1Z, chan2=chan2R, outdir=outdir, pfx=pfx)
                         self.wsac_xcorr(netcode1=netcode1, stacode1=stacode1, netcode2=netcode2,
                                 stacode2=stacode2, chan1=chan1T, chan2=chan2Z, outdir=outdir, pfx=pfx)
                         self.wsac_xcorr(netcode1=netcode1, stacode1=stacode1, netcode2=netcode2,
                                 stacode2=stacode2, chan1=chan1Z, chan2=chan2T, outdir=outdir, pfx=pfx)
         return
+    
+    def xcorr_prephp(self, outdir, mapfile='./MAPS/smpkolya_phv'):
+        """
+        Generate predicted phase velocity dispersion curves for cross-correlation pairs
+        ====================================================================================
+        Input Parameters:
+        outdir  - output directory
+        mapfile - phase velocity maps
+        ------------------------------------------------------------------------------------
+        Input format:
+        prephaseEXE pathfname mapfile perlst staname
+        
+        Output format:
+        outdirL(outdirR)/evid.staid.pre
+        ====================================================================================
+        """
+        staLst=self.waveforms.list()
+        for evid in staLst:
+            evnetcode, evstacode=evid.split('.')
+            evla, evz, evlo=self.waveforms[evid].coordinates.values()
+            pathfname=evid+'_pathfile'
+            prephaseEXE='./mhr_grvel_predict/lf_mhr_predict_earth'
+            perlst='./mhr_grvel_predict/perlist_phase'
+            if not os.path.isfile(prephaseEXE):
+                print 'lf_mhr_predict_earth executable does not exist!'
+                return
+            if not os.path.isfile(perlst):
+                print 'period list does not exist!'
+                return
+            with open(pathfname,'w') as f:
+                ista=0
+                for station_id in staLst:
+                    stacode=station_id.split('.')[1]
+                    if evstacode >= stacode:
+                        continue
+                    stla, stz, stlo=self.waveforms[station_id].coordinates.values()
+                    if ( abs(stlo-evlo) < 0.1 and abs(stla-evla)<0.1 ):
+                        continue
+                    ista=ista+1
+                    f.writelines('%5d%5d %15s %15s %10.5f %10.5f %10.5f %10.5f \n'
+                            %(1, ista, evid, station_id, evla, evlo, stla, stlo ))
+            call([prephaseEXE, pathfname, mapfile, perlst, evid])
+            os.remove(pathfname)
+            outdirL=outdir+'_L'
+            outdirR=outdir+'_R'
+            if not os.path.isdir(outdirL):
+                os.makedirs(outdirL)
+            if not os.path.isdir(outdirR):
+                os.makedirs(outdirR)
+            fout = open(evid+'_temp','wb')
+            for l1 in open('PREDICTION_L'+'_'+evid):
+                l2 = l1.rstrip().split()
+                if (len(l2)>8):
+                    fout.close()
+                    outname = outdirL + "/%s.%s.pre" % (l2[3],l2[4])
+                    fout = open(outname,"w")
+                elif (len(l2)>7):
+                    fout.close()
+                    outname = outdirL + "/%s.%s.pre" % (l2[2],l2[3])
+                    fout = open(outname,"w")                
+                else:
+                    fout.write("%g %g\n" % (float(l2[0]),float(l2[1])))
+            for l1 in open('PREDICTION_R'+'_'+evid):
+                l2 = l1.rstrip().split()
+                if (len(l2)>8):
+                    fout.close()
+                    outname = outdirR + "/%s.%s.pre" % (l2[3],l2[4])
+                    fout = open(outname,"w")
+                elif (len(l2)>7):
+                    fout.close()
+                    outname = outdirR + "/%s.%s.pre" % (l2[2],l2[3])
+                    fout = open(outname,"w")         
+                else:
+                    fout.write("%g %g\n" % (float(l2[0]),float(l2[1])))
+            fout.close()
+            os.remove(evid+'_temp')
+            os.remove('PREDICTION_L'+'_'+evid)
+            os.remove('PREDICTION_R'+'_'+evid)
+        return
+    
+    
+    def xcorr_aftan(self, channel='ZZ', tb=0., outdir=None, inftan=pyaftan.InputFtanParam(), basic1=True, basic2=True,
+            pmf1=True, pmf2=True, verbose=True, prephdir=None, f77=True, pfx='DISP'):
+        """ aftan analysis of cross-correlation data 
+        =======================================================================================
+        Input Parameters:
+        channel     - channel pair for aftan analysis(e.g. 'ZZ', 'TT', 'ZR', 'RZ'...)
+        tb          - begin time (default = 0.0)
+        outdir      - directory for output disp txt files (default = None, no txt output)
+        inftan      - input aftan parameters
+        basic1      - save basic aftan results or not
+        basic2      - save basic aftan results(with jump correction) or not
+        pmf1        - save pmf aftan results or not
+        pmf2        - save pmf aftan results(with jump correction) or not
+        prephdir    - directory for predicted phase velocity dispersion curve
+        f77         - use aftanf77 or not
+        pfx         - prefix for output txt DISP files
+        ---------------------------------------------------------------------------------------
+        Output:
+        self.auxiliary_data.DISPbasic1, self.auxiliary_data.DISPbasic2,
+        self.auxiliary_data.DISPpmf1, self.auxiliary_data.DISPpmf2
+        =======================================================================================
+        """
+        print 'Start aftan analysis!'
+        staLst=self.waveforms.list()
+        for staid1 in staLst:
+            for staid2 in staLst:
+                netcode1, stacode1=staid1.split('.')
+                netcode2, stacode2=staid2.split('.')
+                if stacode1 >= stacode2:
+                    continue
+                try:
+                    channels1=self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2].list()
+                    channels2=self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2][channels1[0]].list()
+                    for chan in channels1:
+                        if chan[2]==channel[0]: chan1=chan
+                    for chan in channels2:
+                        if chan[2]==channel[1]: chan2=chan
+                except AttributeError:
+                    continue
+                try:
+                    tr=self.get_xcorr_trace(netcode1, stacode1, netcode2, stacode2, chan1, chan2)
+                except NameError:
+                    print netcode1+'.'+stacode1+'_'+netcode2+'.'+stacode2+'_'+channel+' not exists!'
+                    continue
+                aftanTr=pyaftan.aftantrace(tr.data, tr.stats)
+                if abs(aftanTr.stats.sac.b+aftanTr.stats.sac.e)<aftanTr.stats.delta:
+                    aftanTr.makesym()
+                if prephdir !=None:
+                    phvelname = prephdir + "/%s.%s.pre" %(netcode1+'.'+stacode1, netcode2+'.'+stacode2)
+                else:
+                    phvelname =''
+                if f77:
+                    aftanTr.aftanf77(pmf=inftan.pmf, piover4=inftan.piover4, vmin=inftan.vmin, vmax=inftan.vmax, tmin=inftan.tmin, tmax=inftan.tmax,
+                        tresh=inftan.tresh, ffact=inftan.ffact, taperl=inftan.taperl, snr=inftan.snr, fmatch=inftan.fmatch, nfin=inftan.nfin,
+                            npoints=inftan.npoints, perc=inftan.perc, phvelname=phvelname)
+                else:
+                    aftanTr.aftan(pmf=inftan.pmf, piover4=inftan.piover4, vmin=inftan.vmin, vmax=inftan.vmax, tmin=inftan.tmin, tmax=inftan.tmax,
+                        tresh=inftan.tresh, ffact=inftan.ffact, taperl=inftan.taperl, snr=inftan.snr, fmatch=inftan.fmatch, nfin=inftan.nfin,
+                            npoints=inftan.npoints, perc=inftan.perc, phvelname=phvelname)
+                if verbose:
+                    print 'aftan analysis for: ' + netcode1+'.'+stacode1+'_'+netcode2+'.'+stacode2+'_'+channel
+                    
+                staid_aux=netcode1+'/'+stacode1+'/'+netcode2+'/'+stacode2+'/'+channel
+                # save aftan results to ASDF dataset
+                if basic1:
+                    parameters={'Tc': 0, 'To': 1, 'Vgr': 2, 'Vph': 3, 'ampdb': 4, 'dis': 5, 'snrdb': 6, 'mhw': 7, 'amp': 8, 'Np': aftanTr.ftanparam.nfout1_1}
+                    self.add_auxiliary_data(data=aftanTr.ftanparam.arr1_1, data_type='DISPbasic1', path=staid_aux, parameters=parameters)
+                if basic2:
+                    parameters={'Tc': 0, 'To': 1, 'Vgr': 2, 'Vph': 3, 'ampdb': 4, 'snrdb': 5, 'mhw': 6, 'amp': 7, 'Np': aftanTr.ftanparam.nfout2_1}
+                    self.add_auxiliary_data(data=aftanTr.ftanparam.arr2_1, data_type='DISPbasic2', path=staid_aux, parameters=parameters)
+                if inftan.pmf:
+                    if pmf1:
+                        parameters={'Tc': 0, 'To': 1, 'Vgr': 2, 'Vph': 3, 'ampdb': 4, 'dis': 5, 'snrdb': 6, 'mhw': 7, 'amp': 8, 'Np': aftanTr.ftanparam.nfout1_2}
+                        self.add_auxiliary_data(data=aftanTr.ftanparam.arr1_2, data_type='DISPpmf1', path=staid_aux, parameters=parameters)
+                    if pmf2:
+                        parameters={'Tc': 0, 'To': 1, 'Vgr': 2, 'Vph': 3, 'ampdb': 4, 'snrdb': 5, 'mhw': 6, 'amp': 7, 'Np': aftanTr.ftanparam.nfout2_2}
+                        self.add_auxiliary_data(data=aftanTr.ftanparam.arr2_2, data_type='DISPpmf2', path=staid_aux, parameters=parameters)
+                if outdir != None:
+                    if not os.path.isdir(outdir+'/'+pfx+'/'+staid1):
+                        os.makedirs(outdir+'/'+pfx+'/'+staid1)
+                    foutPR=outdir+'/'+pfx+'/'+netcode1+'.'+stacode1+'/'+ \
+                                    pfx+'_'+netcode1+'.'+stacode1+'_'+chan1+'_'+netcode2+'.'+stacode2+'_'+chan2+'.SAC'
+                    tr.ftanparam.writeDISP(foutPR)
+        print 'End aftan analysis!'
+        return
+    
+    def interp_disp(self, data_type='DISPbasic1', pers=np.array([10., 15., 20., 25.]), verbose=True):
+        """ Interpolate dispersion curve for a given period array.
+        ================================================================================
+        Input Parameters:
+        data_type   - dispersion data type (default = DISPbasic1, basic aftan results)
+        pers        - period array
+        
+        Output:
+        self.auxiliary_data.DISPbasic1interp, self.auxiliary_data.DISPbasic2interp,
+        self.auxiliary_data.DISPpmf1interp, self.auxiliary_data.DISPpmf2interp
+        ================================================================================
+        """
+        staidLst=self.auxiliary_data[data_type].list()
+        for staid in staidLst:
+            subdset = self.auxiliary_data[data_type][staid]
+            data=subdset.data.value
+            index=subdset.parameters
+            knetwk=str(subdset.parameters['knetwk'])
+            kstnm=str(subdset.parameters['kstnm'])
+            if verbose:
+                print 'Interpolating dispersion curve for '+ knetwk + kstnm
+            outindex={ 'To': 0, 'Vgr': 1, 'Vph': 2,  'amp': 3, 'inbound': 4, 'Np': pers.size, 'knetwk': knetwk, 'kstnm': kstnm }
+            Np=index['Np']
+            if Np < 5:
+                warnings.warn('Not enough datapoints for: '+ knetwk+'.'+kstnm, UserWarning, stacklevel=1)
+                continue
+                # print 'Not enough datapoints for: '+ knetwk+'.'+kstnm
+            obsT=data[index['To']][:Np]
+            Vgr=np.interp(pers, obsT, data[index['Vgr']][:Np] )
+            Vph=np.interp(pers, obsT, data[index['Vph']][:Np] )
+            amp=np.interp(pers, obsT, data[index['amp']][:Np] )
+            inbound=(pers > obsT[0])*(pers < obsT[-1])*1
+            interpdata=np.append(pers, Vgr)
+            interpdata=np.append(interpdata, Vph)
+            interpdata=np.append(interpdata, amp)
+            interpdata=np.append(interpdata, inbound)
+            interpdata=interpdata.reshape(5, pers.size)
+            self.add_auxiliary_data(data=interpdata, data_type=data_type+'interp', path=staid, parameters=outindex)
+        return
+    
                
-
+    def xcorr_aftan_mp(self, outdir, channel='ZZ', tb=0., inftan=pyaftan.InputFtanParam(), basic1=True, basic2=True,
+            pmf1=True, pmf2=True, verbose=True, prephdir=None, f77=True, pfx='DISP', subsize=1000, deletedisp=True):
+        """ aftan analysis of cross-correlation data with multiprocessing
+        =======================================================================================
+        Input Parameters:
+        channel     - channel pair for aftan analysis(e.g. 'ZZ', 'TT', 'ZR', 'RZ'...)
+        tb          - begin time (default = 0.0)
+        outdir      - directory for output disp binary files
+        inftan      - input aftan parameters
+        basic1      - save basic aftan results or not
+        basic2      - save basic aftan results(with jump correction) or not
+        pmf1        - save pmf aftan results or not
+        pmf2        - save pmf aftan results(with jump correction) or not
+        prephdir    - directory for predicted phase velocity dispersion curve
+        f77         - use aftanf77 or not
+        pfx         - prefix for output txt DISP files
+        subsize     - subsize of processing list, use to prevent lock in multiprocessing process
+        deletedisp  - delete output dispersion files or not
+        ---------------------------------------------------------------------------------------
+        Output:
+        self.auxiliary_data.DISPbasic1, self.auxiliary_data.DISPbasic2,
+        self.auxiliary_data.DISPpmf1, self.auxiliary_data.DISPpmf2
+        =======================================================================================
+        """
+        print 'Start aftan analysis!'
+        staLst=self.waveforms.list()
+        inputStream=[]
+        for staid1 in staLst:
+            if not os.path.isdir(outdir+'/'+pfx+'/'+staid1):
+                os.makedirs(outdir+'/'+pfx+'/'+staid1)
+            for staid2 in staLst:
+                netcode1, stacode1=staid1.split('.')
+                netcode2, stacode2=staid2.split('.')
+                if stacode1 >= stacode2:
+                    continue
+                try:
+                    channels1=self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2].list()
+                    channels2=self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2][channels1[0]].list()
+                    for chan in channels1:
+                        if chan[2]==channel[0]: chan1=chan
+                    for chan in channels2:
+                        if chan[2]==channel[1]: chan2=chan
+                except AttributeError:
+                    continue
+                try:
+                    tr=self.get_xcorr_trace(netcode1, stacode1, netcode2, stacode2, chan1, chan2)
+                except NameError:
+                    print netcode1+'.'+stacode1+'_'+netcode2+'.'+stacode2+'_'+channel+' not exists!'
+                    continue
+                aftanTr=pyaftan.aftantrace(tr.data, tr.stats)
+                inputStream.append(aftanTr)
+        print 'Start aftan analysis (MP)!'
+        if len(inputStream) > subsize:
+            Nsub = int(len(inputStream)/subsize)
+            for isub in xrange(Nsub):
+                print isub,'in',Nsub
+                cstream=inputStream[isub*subsize:(isub+1)*subsize]
+                AFTAN = partial(aftan4mp, outdir=outdir, inftan=inftan, prephdir=prephdir, f77=f77, pfx=pfx)
+                pool = multiprocessing.Pool()
+                pool.map(AFTAN, cstream) #make our results with a map call
+                pool.close() #we are not adding any more processes
+                pool.join() #tell it to wait until all threads are done before going on
+            cstream=inputStream[(isub+1)*subsize:]
+            AFTAN = partial(aftan4mp, outdir=outdir, inftan=inftan, prephdir=prephdir, f77=f77, pfx=pfx)
+            pool = multiprocessing.Pool()
+            pool.map(AFTAN, cstream) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        else:
+            AFTAN = partial(aftan4mp, outdir=outdir, inftan=inftan, prephdir=prephdir, f77=f77, pfx=pfx)
+            pool = multiprocessing.Pool()
+            pool.map(AFTAN, inputStream) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        print 'End of aftan analysis  ( MP ) !'
+        print 'Reading aftan results into ASDF Dataset!'
+        for staid1 in staLst:
+            for staid2 in staLst:
+                netcode1, stacode1=staid1.split('.')
+                netcode2, stacode2=staid2.split('.')
+                if stacode1 >= stacode2:
+                    continue
+                try:
+                    channels1=self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2].list()
+                    channels2=self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2][channels1[0]].list()
+                    for chan in channels1:
+                        if chan[2]==channel[0]: chan1=chan
+                    for chan in channels2:
+                        if chan[2]==channel[1]: chan2=chan
+                except AttributeError:
+                    continue
+                finPR=pfx+'/'+netcode1+'.'+stacode1+'/'+ \
+                        pfx+'_'+netcode1+'.'+stacode1+'_'+chan1+'_'+netcode2+'.'+stacode2+'_'+chan2+'.SAC'
+                try:
+                    f10=np.load(outdir+'/'+finPR+'_1_DISP.0.npz')
+                    f11=np.load(outdir+'/'+finPR+'_1_DISP.1.npz')
+                    f20=np.load(outdir+'/'+finPR+'_2_DISP.0.npz')
+                    f21=np.load(outdir+'/'+finPR+'_2_DISP.1.npz')
+                except IOError:
+                    print 'NO aftan results: '+ netcode1+'.'+stacode1+'_'+netcode2+'.'+stacode2+'_'+channel
+                    continue
+                print 'Reading aftan results '+ netcode1+'.'+stacode1+'_'+netcode2+'.'+stacode2+'_'+channel
+                if deletedisp:
+                    os.remove(outdir+'/'+finPR+'_1_DISP.0.npz')
+                    os.remove(outdir+'/'+finPR+'_1_DISP.1.npz')
+                    os.remove(outdir+'/'+finPR+'_2_DISP.0.npz')
+                    os.remove(outdir+'/'+finPR+'_2_DISP.1.npz')
+                arr1_1=f10['arr_0']
+                nfout1_1=f10['arr_1']
+                arr2_1=f11['arr_0']
+                nfout2_1=f11['arr_1']
+                arr1_2=f20['arr_0']
+                nfout1_2=f20['arr_1']
+                arr2_2=f21['arr_0']
+                nfout2_2=f21['arr_1']
+                staid_aux=netcode1+'/'+stacode1+'/'+netcode2+'/'+stacode2+'/'+channel
+                print staid_aux
+                if basic1:
+                    parameters={'Tc': 0, 'To': 1, 'Vgr': 2, 'Vph': 3, 'ampdb': 4, 'dis': 5, 'snrdb': 6, 'mhw': 7, 'amp': 8, 'Np': nfout1_1}
+                    self.add_auxiliary_data(data=arr1_1, data_type='DISPbasic1', path=staid_aux, parameters=parameters)
+                if basic2:
+                    parameters={'Tc': 0, 'To': 1, 'Vgr': 2, 'Vph': 3, 'ampdb': 4, 'snrdb': 5, 'mhw': 6, 'amp': 7, 'Np': nfout2_1}
+                    self.add_auxiliary_data(data=arr2_1, data_type='DISPbasic2', path=staid_aux, parameters=parameters)
+                if inftan.pmf:
+                    if pmf1:
+                        parameters={'Tc': 0, 'To': 1, 'Vgr': 2, 'Vph': 3, 'ampdb': 4, 'dis': 5, 'snrdb': 6, 'mhw': 7, 'amp': 8, 'Np': nfout1_2}
+                        self.add_auxiliary_data(data=arr1_2, data_type='DISPpmf1', path=staid_aux, parameters=parameters)
+                    if pmf2:
+                        parameters={'Tc': 0, 'To': 1, 'Vgr': 2, 'Vph': 3, 'ampdb': 4, 'snrdb': 5, 'mhw': 6, 'amp': 7, 'Np': nfout2_2}
+                        self.add_auxiliary_data(data=arr2_2, data_type='DISPpmf2', path=staid_aux, parameters=parameters)
+        if deletedisp:
+            shutil.rmtree(outdir+'/'+pfx)
+        return
+    
+    
             
 def stack4mp(inv, datadir, outdir, ylst, mlst, pfx, fnametype):
     stackedST=[]
@@ -555,9 +1008,9 @@ def stack4mp(inv, datadir, outdir, ylst, mlst, pfx, fnametype):
             for chan2 in channels2:
                 month=monthdict[mlst[im]]
                 yrmonth=str(ylst[im])+'.'+month
-                if fnametype=='LF':
+                if fnametype==1:
                     fname=datadir+'/'+yrmonth+'/'+pfx+'/'+stacode1+'/'+pfx+'_'+stacode1+'_'+chan1.code+'_'+stacode2+'_'+chan2.code+'.SAC'
-                elif fnametype=='YT':
+                elif fnametype==2:
                     fname=datadir+'/'+yrmonth+'/'+pfx+'/'+stacode1+'/'+pfx+'_'+stacode1+'_'+stacode2+'.SAC'
                 if not os.path.isfile(fname):
                     skipflag=True
@@ -592,8 +1045,30 @@ def stack4mp(inv, datadir, outdir, ylst, mlst, pfx, fnametype):
                 stackedTr=stackedST[i]
                 outfname=outdir+'/'+pfx+'/'+netcode1+'.'+stacode1+'/'+ \
                     pfx+'_'+netcode1+'.'+stacode1+'_'+chan1.code+'_'+netcode2+'.'+stacode2+'_'+chan2.code+'.SAC'
-                stackedTr.write(outfname,format='SAC')
+                stackedTr.write(outfname, format='SAC')
                 i+=1
+    return
+
+def aftan4mp(aTr, outdir, inftan, prephdir, f77, pfx):
+    print 'aftan analysis for', aTr.stats.network, aTr.stats.station
+    if prephdir !=None:
+        phvelname = prephdir + "/%s.%s.pre" %(aTr.stats.sac.kuser0+'.'+aTr.stats.sac.kevnm, aTr.stats.network+'.'+aTr.stats.station)
+    else:
+        phvelname =''
+    print phvelname
+    if f77:
+        aTr.aftanf77(pmf=inftan.pmf, piover4=inftan.piover4, vmin=inftan.vmin, vmax=inftan.vmax, tmin=inftan.tmin, tmax=inftan.tmax,
+            tresh=inftan.tresh, ffact=inftan.ffact, taperl=inftan.taperl, snr=inftan.snr, fmatch=inftan.fmatch, nfin=inftan.nfin,
+                npoints=inftan.npoints, perc=inftan.perc, phvelname=phvelname)
+    else:
+        aTr.aftan(pmf=inftan.pmf, piover4=inftan.piover4, vmin=inftan.vmin, vmax=inftan.vmax, tmin=inftan.tmin, tmax=inftan.tmax,
+                    tresh=inftan.tresh, ffact=inftan.ffact, taperl=inftan.taperl, snr=inftan.snr, fmatch=inftan.fmatch, nfin=inftan.nfin,
+                        npoints=inftan.npoints, perc=inftan.perc, phvelname=phvelname)
+    chan1=aTr.stats.sac.kcmpnm[:3]
+    chan2=aTr.stats.sac.kcmpnm[3:]
+    foutPR=outdir+'/'+pfx+'/'+aTr.stats.sac.kuser0+'.'+aTr.stats.sac.kevnm+'/'+ \
+                pfx+'_'+aTr.stats.sac.kuser0+'.'+aTr.stats.sac.kevnm+'_'+chan1+'_'+aTr.stats.network+'.'+aTr.stats.station+'_'+chan2+'.SAC'
+    aTr.ftanparam.writeDISPbinary(foutPR)
     return
     
     

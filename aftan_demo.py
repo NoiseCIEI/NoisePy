@@ -1,58 +1,33 @@
 import obspy
-import noisepy as npy
+import pyaftan
 import matplotlib.pyplot as plt
 import numpy as np
-# f='/lustre/janus_scratch/life9360/ALASKA_COR/COR/SAW/COR_SAW_BHZ_SII_BHZ.SAC'
-# f1='/lustre/janus_scratch/life9360/SES3D_WorkingDir/OUTPUT_SAC_ak135/LF.S005032..BXZ.SAC'
-f1='/projects/life9360/SYN_TEST_ARTIE/DATA/TOMO_1D.ak135/SAC_Z/S017021.SS.BXZ.sem.sac'
-f1='/lustre/janus_scratch/life9360/EA_ses3d_working_dir/OUTPUT_SAC_EA_10sec_1km_001/LF.EA123S32..BXZ.SAC'
-# f2='/projects/life9360/SYN_TEST_ARTIE/DATA/TOMO_1D.ak135/SAC_Z/S005035.SS.BXZ.sem.sac'
-# f1='INSTASEIS.LXZ.SAC'
-# f2='/projects/life9360/SYN_TEST_ARTIE/DATA/TOMO_1D.ak135/SAC_Z/S019025.SS.BXZ.sem.sac'
-# f2='/lustre/janus_scratch/life9360/SES3D_WorkingDir/OUTPUT_SAC/LF.S005032..BXZ.SAC'
-# f2='/projects/life9360/SYN_TEST_ARTIE/DATA/TOMO_1D.ak135/SAC_Z/S006001.SS.BXZ.sem.sac'
-# f2='/lustre/janus_scratch/life9360/SES3D_WorkingDir/OUTPUT_SAC_vel/LF.S002008..BXZ.SAC'
-# f='./instaseis_ftan/LF.S000.SAC'
-# f2='./instaseis_ftan/LF.S000.SAC'
-f='./instaseis_ftan/LF.S000.SAC'
-# f2='./instaseis_ftan/LF.S000.SAC'
-#prefname='/lustre/janus_scratch/life9360/EA_ses3d_working_dir/OUTPUT_DISP_EA_10sec_1km_001/PREPHASE_R/NKNT.EA123S32.pre'
-prefname='/projects/life9360/code/PRE_PHASE/ALASKA_L/CLCO.N25K.pre'
-f='/projects/life9360/code/fk/ak135_Q_15_1/30.grn.0'
-f='/projects/life9360/code/CPSPy/sac_dir/B00511ZVF.sac'
-f='/lustre/janus_scratch/life9360/sw4_working_dir_trials/ak135/SW4.38S1000.u'
+# 
+# prefname='/lustre/janus_scratch/life9360/PRE_PHP/ses3d_2016_R/E000.98S43.pre'
+# f='SES.174S110.SAC'
+# f='./sac_data/SES.98S43.SAC'
+# f='/work3/leon/COR_TEST/2008.APR/COR/109C/COR_109C_BHZ_R21A_BHZ.SAC'
+f='./COR.sac'
 st=obspy.read(f)
 tr=st[0]
-tr1=npy.noisetrace(tr.data, tr.stats)
-tr1.aftan(piover4=-1., pmf=True, tmin=2.0, tmax=50.0, phvelname=prefname)
-# st=obspy.read(f2)
-# tr=st[0]
-# tr2=npy.noisetrace(tr.data*2., tr.stats)
-# tr2.aftan(piover4=-1., pmf=True, tmin=2.0, tmax=50.0, phvelname=prefname)
-# tr1=npy.noisetrace(tr.data, tr.stats)
-# tr1.aftan(piover4=0, pmf=True, tmin=2.0, tmax=50.0, phvelname=prefname)
-# tr1.ftanparam.FTANcomp(tr.ftanparam)
-# st=obspy.read(f2)
-# tr=st[0]
-# tr2=npy.noisetrace(tr.data, tr.stats)
-# tr2.aftan(piover4=0., pmf=True, tmin=2.0, tmax=100.0,phvelname='ak135.disp')
-# tr1.ftanparam.writeDISP(f)
-# tr1.getSNR (tmin=4.0, tmax=70.0)
-# tr1.SNRParam.writeAMPSNR(f)
-# tr1.ftanparam.FTANcomp(tr2.ftanparam)
-# 
-# InAK135Arr=np.loadtxt('prem.disp')
-# T=InAK135Arr[:,0];
-# V=InAK135Arr[:,1];
-# ax = plt.subplot()
-# ax.plot(T, V, '--r', lw=3);
-# # 
-# InAK135Arr=np.loadtxt('ak135.disp')
-# T=InAK135Arr[:,0];
-# V=InAK135Arr[:,1];
-# ax = plt.subplot()
-# ax.plot(T, V, '--g', lw=3);
-tr1.plotftan()
+tr1=pyaftan.aftantrace(tr.data, tr.stats)
+# tr1.stats.sac.b=-0.0
+tr1.makesym()
+# tr1.aftanf77(piover4=-1., pmf=True, vmin=2.4, vmax=3.5, ffact=1. , tmin=4.0, tmax=30.0)
+inftan=pyaftan.InputFtanParam()
+tr1.aftanf77(pmf=inftan.pmf, piover4=inftan.piover4, vmin=inftan.vmin, vmax=inftan.vmax, tmin=inftan.tmin, tmax=inftan.tmax,
+            tresh=inftan.tresh, ffact=inftan.ffact, taperl=inftan.taperl, snr=inftan.snr, fmatch=inftan.fmatch, nfin=inftan.nfin,
+                npoints=inftan.npoints, perc=inftan.perc)
+tr1.plotftan(plotflag=0)
 plt.show()
-
-
+# # 
+# prefname='/lustre/janus_scratch/life9360/PRE_PHP/ses3d_2016_R/E000.98S47.pre'
+# f='./sac_major_second_seismogram/SES.98S47.SAC'
+# st=obspy.read(f)
+# tr=st[0]
+# tr2=symdata.ses3dtrace(tr.data, tr.stats)
+# # tr1.stats.sac.b=-0.0
+# tr2.aftan(piover4=-1., pmf=True, vmin=2.4, vmax=3.5, ffact=1. , tmin=6.0, tmax=15.0, phvelname=prefname)
+# tr1.ftanparam.FTANcomp(tr2.ftanparam,  compflag=4)
+# 
+# plt.show()

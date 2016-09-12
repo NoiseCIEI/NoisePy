@@ -120,6 +120,7 @@ class ftanParam(object):
                 arr2_2[5,:] -  signal/noise ratio, Db (real*8)
                 arr2_2[6,:] -  maximum half width, s (real*8)
                 arr2_2[7,:] -  amplitudes
+                arr2_2[8,:] -  signal/noise ratio (optional)
     tamp_2   -  time to the beginning of ampo table, s (real*8)
     nrow_2   -  number of rows in array ampo, (integer*4)
     ncol_2   -  number of columns in array ampo, (integer*4)
@@ -167,38 +168,38 @@ class ftanParam(object):
             f10=fnamePR+'_1_DISP.0'
             Lf10=self.nfout1_1
             outArrf10=np.arange(Lf10)
-            for i in np.arange(7):
+            for i in xrange(9):
                 outArrf10=np.append(outArrf10, self.arr1_1[i,:Lf10])
-            outArrf10=outArrf10.reshape((8,Lf10))
+            outArrf10=outArrf10.reshape((10,Lf10))
             outArrf10=outArrf10.T
-            np.savetxt(f10, outArrf10, fmt='%4d %10.4lf %10.4lf %12.4lf %12.4lf %12.4lf %12.4lf %8.3lf')
+            np.savetxt(f10, outArrf10, fmt='%4d %10.4lf %10.4lf %12.4lf %12.4lf %12.4lf %12.4lf %8.3lf %12.4lf %12.4lf')
         if self.nfout2_1!=0:
             f11=fnamePR+'_1_DISP.1'
             Lf11=self.nfout2_1
             outArrf11=np.arange(Lf11)
-            for i in np.arange(6):
+            for i in xrange(8):
                 outArrf11=np.append(outArrf11, self.arr2_1[i,:Lf11])
-            outArrf11=outArrf11.reshape((7,Lf11))
+            outArrf11=outArrf11.reshape((9,Lf11))
             outArrf11=outArrf11.T
-            np.savetxt(f11, outArrf11, fmt='%4d %10.4lf %10.4lf %12.4lf %12.4lf %12.4lf %8.3lf')
+            np.savetxt(f11, outArrf11, fmt='%4d %10.4lf %10.4lf %12.4lf %12.4lf %12.4lf %8.3lf %12.4lf %12.4lf')
         if self.nfout1_2!=0:
             f20=fnamePR+'_2_DISP.0'
             Lf20=self.nfout1_2
             outArrf20=np.arange(Lf20)
-            for i in np.arange(7):
+            for i in xrange(9):
                 outArrf20=np.append(outArrf20, self.arr1_2[i,:Lf20])
-            outArrf20=outArrf20.reshape((8,Lf20))
+            outArrf20=outArrf20.reshape((10,Lf20))
             outArrf20=outArrf20.T
-            np.savetxt(f20, outArrf20, fmt='%4d %10.4lf %10.4lf %12.4lf %12.4lf %12.4lf %12.4lf %8.3lf')
+            np.savetxt(f20, outArrf20, fmt='%4d %10.4lf %10.4lf %12.4lf %12.4lf %12.4lf %12.4lf %8.3lf %12.4lf %12.4lf')
         if self.nfout2_2!=0:
             f21=fnamePR+'_2_DISP.1'
             Lf21=self.nfout2_2
             outArrf21=np.arange(Lf21)
-            for i in np.arange(6):
+            for i in xrange(9):
                 outArrf21=np.append(outArrf21, self.arr2_2[i,:Lf21])
-            outArrf21=outArrf21.reshape((7,Lf21))
+            outArrf21=outArrf21.reshape((10,Lf21))
             outArrf21=outArrf21.T
-            np.savetxt(f21, outArrf21, fmt='%4d %10.4lf %10.4lf %12.4lf %12.4lf %12.4lf %8.3lf')
+            np.savetxt(f21, outArrf21, fmt='%4d %10.4lf %10.4lf %12.4lf %12.4lf %12.4lf %12.4lf %8.3lf %12.4lf %12.4lf')
         return
     
     def writeDISPbinary(self, fnamePR):
@@ -271,7 +272,6 @@ class ftanParam(object):
             plt.ylabel('Velocity(km/s)')
             plt.title('Phase Velocity Comparison')
         return
-
 
 class InputFtanParam(object): ###
     """
@@ -426,7 +426,7 @@ class aftantrace(obspy.core.trace.Trace):
                 nfin=nfin, npoints=npoints, perc=perc, predV=predV)
         # phase matched filter aftan
         if pmf:
-            return self._aftanipg(piover4=piover4, vmin=vmin, vmax=vmax, tresh=tresh, ffact=ffact, taperl=taperl,
+            self._aftanipg(piover4=piover4, vmin=vmin, vmax=vmax, tresh=tresh, ffact=ffact, taperl=taperl,
                 snr=snr, fmatch=fmatch, nfin=nfin, npoints=npoints, perc=perc, predV=predV)
         return
 
@@ -820,9 +820,7 @@ class aftantrace(obspy.core.trace.Trace):
                 ind_localmax=np.append(ind_localmax, ne+1-nb)
             ind_all.append(ind_localmax)
             dph, tm, ph, t=self._fmax(amp=ampk, pha=phaArr[:,k], ind=ind_localmax, om=omega, piover4=piover4)
-            # imax=tm.argmax()
-            ind_sort=np.argsort(tm)
-            imax=ind_sort[-1]
+            imax=tm.argmax()
             ipar=np.zeros((6, ind_localmax.size))
             ipar[0, :]  = (nb+ind_localmax-2.+t)*dt # note the difference with aftanf77, due to ind_localmax
             ipar[1, :]  = 2*np.pi*dt/dph
@@ -847,16 +845,7 @@ class aftantrace(obspy.core.trace.Trace):
                 lmindex=minindexArr[:-1]
                 rmindex=minindexArr[1:]
             ipar[3,:] = 20.*np.log10(ampok[ind_localmax]/np.sqrt(lm*rm))
-            ipar[4,:] = (np.abs(ind_localmax-lmindex)+np.abs(ind_localmax-rmindex))/2.*dt
-            
-            # try:
-            #     imax2=ind_sort[-2]
-            #     if imax2<imax and tm[imax2]+30. > tm[imax]:
-            #         # print tm[imax2], tm[imax]
-            #         imax=imax2
-            # except:
-            #     pass
-            
+            ipar[4,:] = (np.abs(ind_localmax-lmindex)+np.abs(ind_localmax-rmindex))/2.*dt            
             tim1[k]   = ipar[0,imax]
             tvis1[k]  = ipar[1,imax]
             ampgr1[k] = ipar[2,imax]
@@ -985,7 +974,6 @@ class aftantrace(obspy.core.trace.Trace):
         self.ftanparam.tamp_2=tamp = (nb-1)*dt+tb
         return
     
-    
     def _compare_arr(self, data1, data2):
         plt.plot(data1-data2, '-y')
         plt.plot(data1, '^r')
@@ -1047,7 +1035,6 @@ class aftantrace(obspy.core.trace.Trace):
             dataTapered[ne-1:] = dataTapered[ne-1:] + rwine*c
         dataTapered[nb:ne-1]=dataTapered[nb:ne-1]+c
         return dataTapered, ncorr
-    
     
     def _fmax(self, amp, pha, ind, om, piover4 ):
         """parabolic interpolation of signal amplitude and phase, finding phase derivative
@@ -1305,7 +1292,7 @@ class aftantrace(obspy.core.trace.Trace):
         self.ftanparam.nfout1_1,self.ftanparam.arr1_1,self.ftanparam.nfout2_1,self.ftanparam.arr2_1,self.ftanparam.tamp_1, \
                 self.ftanparam.nrow_1,self.ftanparam.ncol_1,self.ftanparam.ampo_1, self.ftanparam.ierr_1= aftan.aftanpg(piover4, nsam, \
                     sig, tb, dt, dist, vmin, vmax, tmin, tmax, tresh, ffact, perc, npoints, taperl, nfin, snr, nprpv, phprper, phprvel)
-        if pmf==True:
+        if pmf:
             if self.ftanparam.nfout2_1<3:
                 return
             npred = self.ftanparam.nfout2_1
@@ -1461,5 +1448,118 @@ class aftantrace(obspy.core.trace.Trace):
         except AttributeError:
             print 'Error: FTAN Parameters are not available!'
         return
+    
+    def get_snr(self, ffact=1.):
+        
+        fparam=self.ftanparam
+        dist=self.stats.sac.dist
+        begT=self.stats.sac.b
+        endT=self.stats.sac.e
+        dt=self.stats.delta
+        if fparam.nfout2_2!=0:
+            o_per=fparam.arr2_2[1,:]
+            g_vel=fparam.arr2_2[2,:]
+            snrArr=np.ones(o_per.size)*-1.
+            for i in xrange(fparam.nfout2_2):
+                if g_vel[i]<0 or o_per[i]<0:
+                    continue
+                filtered_tr=self.gaussian_filter_aftan(1./o_per[i], ffact=ffact)
+                minT = dist/g_vel[i]-o_per[i]/2.
+                maxT = dist/g_vel[i]+o_per[i]/2.
+                if(minT<begT):
+                    minT=begT
+                if(maxT>endT):
+                    maxT=endT
+                # Noise window
+                minT = maxT + o_per[i] * 5. + 500.
+                skipflag=False
+                if( (endT - minT) < 50. ):
+                    skipflag=True
+                elif( (endT - minT) < 1100. ):
+                    maxT = endT - 10.
+                else:
+                    minT = endT - 1100.
+                    maxT = endT - 100.
+                if not skipflag:
+                    ib = (int)(minT/dt)
+                    ie = (int)(maxT/dt)+2
+                    tempnoise=filtered_tr[ib:ie]
+                    noiserms=np.sqrt(( np.sum(tempnoise**2))/(ie-ib-1.) )
+                    amp=self.ftanparam.arr2_2[7,i]
+                    snrArr[i]=amp/noiserms
+            self.ftanparam.arr2_2=np.append(fparam.arr2_2, snrArr)
+            self.ftanparam.arr2_2=self.ftanparam.arr2_2.reshape(9, o_per.size)
+        return
+                
+                    
+        
+    def gaussian_filter_snr(self, fcenter, fhlen=0.008):
+        """
+        Gaussian filter designed for SNR analysis, utilize pyfftw to do fft
+        exp( (-0.5/fhlen^2)*(f-fcenter)^2 )
+        ====================================================================
+        Input parameters:
+        fcenter - central period
+        fhlen   - half length of Gaussian width
+        ====================================================================
+        """
+        npts=self.stats.npts
+        ns=1<<(npts-1).bit_length()
+        df=1.0/self.stats.delta/ns
+        nhalf=ns/2+1
+        fmax=(nhalf-1)*df
+        if fcenter>fmax:
+            fcenter=fmax
+        alpha = -0.5/(fhlen*fhlen)
+        F=np.arange(ns)*df
+        gauamp = F - fcenter
+        sf=np.exp(alpha*gauamp**2)
+        if useFFTW:
+            sp=pyfftw.interfaces.numpy_fft.fft(self.data, ns)
+        else:
+            sp=np.fft.fft(self.data, ns)
+        filtered_sp=sf*sp
+        filtered_sp[ns/2:]=0
+        filtered_sp[0]/=2
+        filtered_sp[ns/2-1]=filtered_sp[ns/2-1].real+0.j
+        if useFFTW:
+            filtered_seis=pyfftw.interfaces.numpy_fft.ifft(filtered_sp, ns)
+        else:
+            filtered_seis=np.fft.ifft(filtered_sp, ns)
+        filtered_seis=2.*filtered_seis[:npts].real
+        return filtered_seis
+    
+    def gaussian_filter_aftan(self, fcenter, ffact=1.):
+        """
+        Gaussian filter designed for SNR analysis, utilize pyfftw to do fft
+        exp( (-0.5/fhlen^2)*(f-fcenter)^2 )
+        ====================================================================
+        Input parameters:
+        fcenter - central period
+        ffact   - factor to automatic filter parameter, usualy =1
+        ====================================================================
+        """
+        npts=self.stats.npts
+        ns=1<<(npts-1).bit_length()
+        df=1.0/self.stats.delta/ns
+        nhalf=ns/2+1
+        fmax=(nhalf-1)*df
+        alpha=ffact*20.
+        if fcenter>fmax:
+            fcenter=fmax
+        omega0=2.*np.pi*fcenter
+        omsArr=2.*np.pi*np.arange(ns)*df
+        if useFFTW:
+            sp=pyfftw.interfaces.numpy_fft.fft(self.data, ns)
+        else:
+            sp=np.fft.fft(self.data, ns)
+        filtered_sp=_aftan_gaussian_filter(alpha=alpha, omega0=omega0, ns=ns, indata=sp, omsArr=omsArr)
+        if useFFTW:
+            filtered_seis=pyfftw.interfaces.numpy_fft.ifft(filtered_sp, ns)
+        else:
+            filtered_seis=np.fft.ifft(filtered_sp, ns)
+        filtered_seis=2.*filtered_seis[:npts].real
+        return filtered_seis
+    
     
     

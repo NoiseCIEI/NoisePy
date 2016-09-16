@@ -1292,7 +1292,7 @@ class aftantrace(obspy.core.trace.Trace):
         self.ftanparam.nfout1_1,self.ftanparam.arr1_1,self.ftanparam.nfout2_1,self.ftanparam.arr2_1,self.ftanparam.tamp_1, \
                 self.ftanparam.nrow_1,self.ftanparam.ncol_1,self.ftanparam.ampo_1, self.ftanparam.ierr_1= aftan.aftanpg(piover4, nsam, \
                     sig, tb, dt, dist, vmin, vmax, tmin, tmax, tresh, ffact, perc, npoints, taperl, nfin, snr, nprpv, phprper, phprvel)
-        if pmf:
+        if pmf==True:
             if self.ftanparam.nfout2_1<3:
                 return
             npred = self.ftanparam.nfout2_1
@@ -1450,7 +1450,6 @@ class aftantrace(obspy.core.trace.Trace):
         return
     
     def get_snr(self, ffact=1.):
-        
         fparam=self.ftanparam
         dist=self.stats.sac.dist
         begT=self.stats.sac.b

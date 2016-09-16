@@ -59,7 +59,7 @@ int main(int na, char *arg[])
     sprintf(name_ani_n,"%sani_n",arg[6]);
 
     double hist[N_bin];
-    double slow_sum1[N_bin];
+    double slow_sum1[N_bin]; 
     double slow_un[N_bin];
     d_bin=(max-min)/N_bin;
     radius=6371.1391285;
@@ -101,6 +101,7 @@ int main(int na, char *arg[])
         sprintf(pflag,"group.c");
     }
     cridist = atof(arg[13]); // minimum distance to central station
+    // initialization
     for(i=0; i<npts_x; i++)
     {
         for(j=0; j<npts_y; j++)
@@ -115,19 +116,19 @@ int main(int na, char *arg[])
     cout<<"now do "<<arg[1]<<endl;
     char *pch;
     char *pch1[20];
-    for(;;)
+    // read station list
+    for(;;) // loop over stations
     {
         if(fscanf(file1,"%s %lf %lf",&event_name,&cvlon,&cvlat)==EOF)
             break;
-        nsta++;
+        nsta++; // number of station
         sprintf(buff1,"%sslow_azi_%s.%s.txt.HD.2.v2",arg[5],event_name,pflag);
         if((fin=fopen(buff1,"r"))==NULL)
         {
             cout<<buff1<<" not exist!!"<<endl;
             continue;
         }
-        //cout<<buff1<<endl;
-        for(;;)
+        for(;;) // loop over field data
         {
             if (fgets(tstr,300,fin) == NULL ) break;
             pch = strtok(tstr," \n");
@@ -143,11 +144,9 @@ int main(int na, char *arg[])
             lat = atof(pch1[1]);
             temp = atof(pch1[2]); // slowness
             temp2 = atof(pch1[3]); // angle
-
             tdist = get_dist(cvlat,cvlon,lat,lon);
             if (tdist < cridist + 50.)
                 continue;
-
             if (trash > cdist1 || temp2 > 900)
                 continue;
             if(lon>x1+0.01||lon<x0-0.01|lat>y1+0.01||lat<y0-0.01) // Out of boundary
@@ -156,14 +155,13 @@ int main(int na, char *arg[])
             }
             i=int((lon-x0)/dx+0.1);
             j=int((lat-y0)/dy+0.1);
-
             if(temp<0.6 &&temp>0.2) // different from the Travel Time to Slowness
             {
                 fprintf(fall,"%g %g %g %g 1 %s\n", lon, lat,1./temp, temp2, event_name);
                 slow[i][j][n[i][j]]=temp;
                 azi[i][j][n[i][j]]=temp2;
                 flag[i][j][n[i][j]]=0;
-                n[i][j]++;
+                n[i][j]++; // n index array for number of measurements at point i,j
             }
         }
         cout<<buff1<<endl;
@@ -181,7 +179,7 @@ int main(int na, char *arg[])
     {
         for(j=0; j<npts_y; j++)
         {
-            if(n[i][j]<0.3*nsta)
+            if(n[i][j]<0.3*nsta) // if number of measurements is less than 15, discard this point
             {
                 fprintf(file_iso,"%lf %lf 0 9999 %d\n",x0+i*dx,y0+j*dy,n[i][j]);
                 continue;

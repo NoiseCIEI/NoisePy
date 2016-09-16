@@ -534,7 +534,7 @@ class noiseASDF(pyasdf.ASDFDataSet):
         return
     
     def xcorr_stack_mp(self, datadir, outdir, startyear, startmonth, endyear, endmonth,
-                    pfx='COR', inchannels=None, fnametype=1, subsize=1000, deletesac=True, nprocess=None):
+                    pfx='COR', inchannels=None, fnametype=1, subsize=1000, deletesac=True, nprocess=4):
         """Stack cross-correlation data from monthly-stacked sac files with multiprocessing
         ===========================================================================================================
         Input Parameters:
@@ -1208,8 +1208,6 @@ class noiseASDF(pyasdf.ASDFDataSet):
                     if snr < 15.: continue
                     fph.writelines("%d %g %g %g %g %g 1. %s %s 1 1 \n" %(i, lat1, lon1, lat2, lon2, pvel, staid1, staid2))
                     fgr.writelines("%d %g %g %g %g %g 1. %s %s 1 1 \n" %(i, lat1, lon1, lat2, lon2, gvel, staid1, staid2))
-                    # fph.writelines("%g %g %g %g %g 1. %s %s 1 1 \n" %(lat1, lon1, lat2, lon2, pvel, staid1, staid2))
-                    # fgr.writelines("%g %g %g %g %g 1. %s %s 1 1 \n" %(lat1, lon1, lat2, lon2, gvel, staid1, staid2))
             fph.close()
             fgr.close()
         print 'End of Generating Misha Tomography Input File!'
@@ -1273,10 +1271,9 @@ class noiseASDF(pyasdf.ASDFDataSet):
                     pvel=data[index['Vph']][ind_per]
                     gvel=data[index['Vgr']][ind_per]
                     snr=data[index['snr']][ind_per]
-                    amp=data[index['amp']][ind_per]
                     inbound=data[index['inbound']][ind_per]
                     # quality control
-                    if pvel < 0 or gvel < 0 or pvel>10 or gvel>10 or snr >1e10 or amp >1e10: continue
+                    if pvel < 0 or gvel < 0 or pvel>10 or gvel>10 or snr >1e10: continue
                     if inbound!=1.: continue
                     if snr < 15.: continue
                     fph=fph_lst[iper]
@@ -1291,105 +1288,95 @@ class noiseASDF(pyasdf.ASDFDataSet):
         print 'End of Generating Misha Tomography Input File!'
         return
     
-    
-    
-    # 
-    # def get_field(self, data_type='DISPpmf2', fieldtype='Vgr', pers=np.array([10.]), outdir=None, distflag=True, verbose=True ):
-    #     """ Get the field data
-    #     =======================================================================================
-    #     Input Parameters:
-    #     data_type   - dispersion data type (default = DISPpmf2, pmf aftan results after jump detection)
-    #     fieldtype   - field data type( Vgr, Vph, Amp)
-    #     pers        - period array
-    #     outdir      - directory for txt output
-    #     distflag    - whether to output distance or not
-    #     Output:
-    #     self.auxiliary_data.FieldDISPbasic1interp, self.auxiliary_data.FieldDISPbasic2interp,
-    #     self.auxiliary_data.FieldDISPpmf1interp, self.auxiliary_data.FieldDISPpmf2interp
-    #     =======================================================================================
-    #     """
-    #     data_type=data_type+'interp'
-    #     tempdict={'Vgr': 'Tgr', 'Vph': 'Tph', 'amp': 'Amp', 'ms':'Ms'}
-    #     if distflag:
-    #         outindex={ 'longitude': 0, 'latitude': 1, tempdict[fieldtype]: 2,  'dist': 3 }
-    #     else:
-    #         outindex={ 'longitude': 0, 'latitude': 1, tempdict[fieldtype]: 2 }
-    #     staidLst=self.auxiliary_data[data_type].list()
-    #     evlo=self.events.events[0].origins[0].longitude
-    #     evla=self.events.events[0].origins[0].latitude
-    #     for per in pers:
-    #         FieldArr=np.array([])
-    #         Nfp=0
-    #         for staid in staidLst:
-    #             subdset = self.auxiliary_data[data_type][staid]
-    #             data=subdset.data.value
-    #             index=subdset.parameters
-    #             knetwk=str(subdset.parameters['knetwk'])
-    #             kstnm=str(subdset.parameters['kstnm'])
-    #             station_id=knetwk+'.'+kstnm
-    #             obsT=data[index['To']]
-    #             if verbose:
-    #                 print 'Getting field data from '+ station_id
-    #             if fieldtype=='ms':
-    #                 outdata=data[index['Vgr']]
-    #             else:
-    #                 outdata=data[index[fieldtype]]
-    #             inbound=data[index['inbound']]
-    #             fieldpoint=outdata[obsT==per]
-    #             if fieldpoint == np.nan or fieldpoint<=0:
-    #                 print station_id+' has invalid value'+' T='+str(per)+'s'
-    #                 continue
-    #             # print fieldpoint
-    #             inflag=inbound[obsT==per]
-    #             if fieldpoint.size==0:
-    #                 print 'No datapoint for'+ station_id+' T='+per+'s in interpolated disp dataset!'
-    #                 continue
-    #             if inflag == 0:
-    #                 print 'Datapoint out of bound: '+ knetwk+'.'+kstnm+' T='+str(per)+'s!'
-    #                 continue
-    #             if fieldtype=='ms':
-    #                 subdset=self.waveforms[station_id]
-    #                 tr=subdset.ses3d_raw[0]
-    #                 tr.stats.sac={}
-    #                 tr.stats.sac.evlo=evlo
-    #                 tr.stats.sac.evla=evla
-    #                 stla, elev, stlo=subdset.coordinates.values()
-    #                 dist, az, baz=obspy.geodetics.gps2dist_azimuth(evla, evlo, stla, stlo) # distance is in m
-    #                 distance = dist/1000.
-    #                 tr.stats.sac.dist=distance
-    #                 ntrace=ses3dtrace(tr.data, tr.stats)
-    #                 try:
-    #                     ab, Ms=ntrace.get_ms(Vgr=fieldpoint)
-    #                 except:
-    #                     continue
-    #                 fieldpoint=Ms
-    #             else:
-    #                 stla, elev, stlo=self.waveforms[station_id].coordinates.values()
-    #                 dist, az, baz=obspy.geodetics.gps2dist_azimuth(evla, evlo, stla, stlo) # distance is in m
-    #                 distance = dist/1000.
-    #             if distance == 0.:
-    #                 continue
-    #             FieldArr=np.append(FieldArr, stlo)
-    #             FieldArr=np.append(FieldArr, stla)
-    #             if fieldtype=='Vgr' or fieldtype=='Vph':
-    #                 fieldpoint=distance/fieldpoint
-    #             FieldArr=np.append(FieldArr, fieldpoint)
-    #             if distflag:
-    #                 FieldArr=np.append(FieldArr, distance)
-    #             Nfp+=1
-    #         if distflag:
-    #             FieldArr=FieldArr.reshape( Nfp, 4)
-    #         else:
-    #             FieldArr=FieldArr.reshape( Nfp, 3)
-    #         if outdir!=None:
-    #             if not os.path.isdir(outdir):
-    #                 os.makedirs(outdir)
-    #             txtfname=outdir+'/'+tempdict[fieldtype]+'_'+str(per)+'.txt'
-    #             header = 'evlo='+str(evlo)+' evla='+str(evla)
-    #             np.savetxt( txtfname, FieldArr, fmt='%g', header=header )
-    #         self.add_auxiliary_data(data=FieldArr, data_type='Field'+data_type, path=tempdict[fieldtype]+str(int(per)), parameters=outindex)
-    #     return
-    
+    def xcorr_get_field(self, outdir=None, channel='ZZ', pers=np.array([]), data_type='DISPpmf2interp', verbose=True):
+        """ Get the field data for Eikonal tomography
+        ============================================================================================================================
+        Input Parameters:
+        outdir      - directory for txt output (default is not to generate txt output)
+        channel     - channel name
+        pers        - period array
+        datatype    - dispersion data type (default = DISPpmf2interp, interpolated pmf aftan results after jump detection)
+        Output:
+        self.auxiliary_data.FieldDISPpmf2interp
+        ============================================================================================================================
+        """
+        if pers.size==0:
+            pers=np.append( np.arange(18.)*2.+6., np.arange(4.)*5.+45.)
+        outindex={ 'longitude': 0, 'latitude': 1, 'Vph': 2,  'Vgr':3, 'snr': 4, 'dist': 5 }
+        staLst=self.waveforms.list()
+        for staid1 in staLst:
+            field_lst=[]
+            Nfplst=[]
+            for per in pers:
+                field_lst.append(np.array([]))
+                Nfplst.append(0)
+            lat1, elv1, lon1=self.waveforms[staid1].coordinates.values()
+            if verbose:
+                print 'Getting field data for: '+staid1
+            for staid2 in staLst:
+                if staid1==staid2:
+                    continue
+                netcode1, stacode1=staid1.split('.')
+                netcode2, stacode2=staid2.split('.')
+                try:
+                    subdset=self.auxiliary_data[data_type][netcode1][stacode1][netcode2][stacode2][channel]
+                except:
+                    try:
+                        subdset=self.auxiliary_data[data_type][netcode2][stacode2][netcode1][stacode1][channel]
+                    except:
+                        continue
+                lat2, elv2, lon2=self.waveforms[staid2].coordinates.values()
+                dist, az, baz=obspy.geodetics.gps2dist_azimuth(lat1, lon1, lat2, lon2) # distance is in m
+                dist=dist/1000.
+                if lon1<0: lon1+=360.
+                if lon2<0: lon2+=360.
+                data=subdset.data.value
+                index=subdset.parameters
+                for iper in xrange(pers.size):
+                    per=pers[iper]
+                    if dist < 2.*per*3.5: continue
+                    ind_per=np.where(data[index['To']][:] == per)[0]
+                    if ind_per.size==0:
+                        raise AttributeError('No interpolated dispersion curve data for period='+str(per)+' sec!')
+                    pvel=data[index['Vph']][ind_per]
+                    gvel=data[index['Vgr']][ind_per]
+                    snr=data[index['snr']][ind_per]
+                    inbound=data[index['inbound']][ind_per]
+                    # quality control
+                    if pvel < 0 or gvel < 0 or pvel>10 or gvel>10 or snr >1e10: continue
+                    if inbound!=1.: continue
+                    if snr < 15.: continue
+                    field_lst[iper]=np.append(field_lst[iper], lon2)
+                    field_lst[iper]=np.append(field_lst[iper], lat2)
+                    field_lst[iper]=np.append(field_lst[iper], pvel)
+                    field_lst[iper]=np.append(field_lst[iper], gvel)
+                    field_lst[iper]=np.append(field_lst[iper], snr)
+                    field_lst[iper]=np.append(field_lst[iper], dist)
+                    Nfplst[iper]+=1
+            # end of reading data from all receivers, taking staid1 as virtual source
+            if outdir!=None:
+                if not os.path.isdir(outdir):
+                    os.makedirs(outdir)
+            staid_aux=netcode1+'/'+stacode1+'/'+channel
+            for iper in xrange(pers.size):
+                per=pers[iper]
+                del_per=per-int(per)
+                if field_lst[iper].size==0:
+                    continue
+                field_lst[iper]=field_lst[iper].reshape(Nfplst[iper], 6)
+                if del_per==0.:
+                    staid_aux_per=staid_aux+'/'+str(int(per))+'sec'
+                else:
+                    dper=str(del_per)
+                    staid_aux_per=staid_aux+'/'+str(int(per))+'sec'+dper.split('.')[1]
+                self.add_auxiliary_data(data=field_lst[iper], data_type='Field'+data_type, path=staid_aux_per, parameters=outindex)
+                if outdir!=None:
+                    if not os.path.isdir(outdir+'/'+str(per)+'sec'):
+                        os.makedirs(outdir+'/'+str(per)+'sec')
+                    txtfname=outdir+'/'+str(per)+'sec'+'/'+staid1+'_'+str(per)+'.txt'
+                    header = 'evlo='+str(lon1)+' evla='+str(lat1)
+                    np.savetxt( txtfname, field_lst[iper], fmt='%g', header=header )
+        return
             
 def stack4mp(inv, datadir, outdir, ylst, mlst, pfx, fnametype):
     stackedST=[]
@@ -1452,7 +1439,7 @@ def stack4mp(inv, datadir, outdir, ylst, mlst, pfx, fnametype):
     return
 
 def aftan4mp(aTr, outdir, inftan, prephdir, f77, pfx):
-    print 'aftan analysis for: '+ aTr.stats.sac.kuser0+'.'+aTr.stats.sac.kevnm+'_'+chan1+'_'+aTr.stats.network+'.'+aTr.stats.station+'_'+chan2
+    # print 'aftan analysis for: '+ aTr.stats.sac.kuser0+'.'+aTr.stats.sac.kevnm+'_'+chan1+'_'+aTr.stats.network+'.'+aTr.stats.station+'_'+chan2
     if prephdir !=None:
         phvelname = prephdir + "/%s.%s.pre" %(aTr.stats.sac.kuser0+'.'+aTr.stats.sac.kevnm, aTr.stats.network+'.'+aTr.stats.station)
     else:

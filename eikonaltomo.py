@@ -143,15 +143,125 @@ class EikonalTomoDataSet(h5py.File):
             per_group=group['%g_sec'%( per )]
             Treason=np.ones((Nlat-4, Nlon-4))
             Nmeasure=np.zeros((Nlat-4, Nlon-4))
+            velArr=np.zeros((Nlat-4, Nlon-4))
             for evid in per_group.keys():
                 event_group=per_group[evid]
                 reason_n=event_group['reason_n'].value
+                appV=event_group['appV'].value
+                velArr[reason_n==0]+=appV[reason_n==0]
                 oneArr=np.ones((Nlat-4, Nlon-4))
                 oneArr[reason_n!=0]=0
                 Nmeasure+=oneArr
-        return Nmeasure
-                
+        velArr[Nmeasure>15]=velArr[Nmeasure>15]/Nmeasure[Nmeasure>15]
+        # self.velArr=velArr
+        self.reason_n=np.zeros((Nlat-4, Nlon-4))
+        self.reason_n[Nmeasure<15]=1
+        self.velArr=self._numpy2ma(velArr)
         
+        
+        self.lons=np.arange((maxlon-minlon)/dlon-3)*dlon+minlon+2*dlon
+        self.lats=np.arange((maxlat-minlat)/dlat-3)*dlat+minlat+2*dlat
+        self.Nlon=self.lons.size; self.Nlat=self.lats.size
+        self.lonArr, self.latArr = np.meshgrid(self.lons, self.lats)
+        return 
+           
+    def _numpy2ma(self, inarray, reason_n=None):
+        """Convert input numpy array to masked array
+        """
+        if reason_n==None:
+            outarray=ma.masked_array(inarray, mask=np.zeros(self.reason_n.shape) )
+            outarray.mask[self.reason_n!=0]=1
+        else:
+            outarray=ma.masked_array(inarray, mask=np.zeros(reason_n.shape) )
+            outarray.mask[reason_n!=0]=1
+        return outarray     
+    
+    def _get_lon_lat_arr(self, dataid):
+        """Get longitude/latitude array
+        """
+        minlon=self.attrs['minlon']
+        maxlon=self.attrs['maxlon']
+        minlat=self.attrs['minlat']
+        maxlat=self.attrs['maxlat']
+        dlon=self[dataid].attrs['dlon']
+        dlat=self[dataid].attrs['dlat']
+        self.lons=np.arange((maxlon-minlon)/dlon+1)*dlon+minlon+2*dlon
+        self.lats=np.arange((maxlat-minlat)/dlat+1)*dlat+minlat+2*dlat
+        self.Nlon=self.lons.size-4; self.Nlat=self.lats.size-4
+        self.lonArr, self.latArr = np.meshgrid(self.lons, self.lats)
+        return
+    
+    def _get_basemap(self, projection='lambert', geopolygons=None, resolution='i'):
+        """Get basemap for plotting results
+        """
+        # fig=plt.figure(num=None, figsize=(12, 12), dpi=80, facecolor='w', edgecolor='k')
+        minlon=self.attrs['minlon']
+        maxlon=self.attrs['maxlon']
+        minlat=self.attrs['minlat']
+        maxlat=self.attrs['maxlat']
+        lat_centre = (maxlat+minlat)/2.0
+        lon_centre = (maxlon+minlon)/2.0
+        if projection=='merc':
+            m=Basemap(projection='merc', llcrnrlat=minlat-5., urcrnrlat=maxlat+5., llcrnrlon=minlon-5.,
+                      urcrnrlon=maxlon+5., lat_ts=20, resolution=resolution)
+            # m.drawparallels(np.arange(minlat,maxlat,dlat), labels=[1,0,0,1])
+            # m.drawmeridians(np.arange(minlon,maxlon,dlon), labels=[1,0,0,1])
+            m.drawparallels(np.arange(-80.0,80.0,5.0), labels=[1,0,0,1])
+            m.drawmeridians(np.arange(-170.0,170.0,5.0), labels=[1,0,0,1])
+            m.drawstates(color='g', linewidth=2.)
+        elif projection=='global':
+            m=Basemap(projection='ortho',lon_0=lon_centre, lat_0=lat_centre, resolution=resolution)
+            # m.drawparallels(np.arange(-80.0,80.0,10.0), labels=[1,0,0,1])
+            # m.drawmeridians(np.arange(-170.0,170.0,10.0), labels=[1,0,0,1])
+        elif projection=='regional_ortho':
+            m1 = Basemap(projection='ortho', lon_0=minlon, lat_0=minlat, resolution='l')
+            m = Basemap(projection='ortho', lon_0=minlon, lat_0=minlat, resolution=resolution,\
+                llcrnrx=0., llcrnry=0., urcrnrx=m1.urcrnrx/mapfactor, urcrnry=m1.urcrnry/3.5)
+            m.drawparallels(np.arange(-80.0,80.0,10.0), labels=[1,0,0,0],  linewidth=2,  fontsize=20)
+            # m.drawparallels(np.arange(-90.0,90.0,30.0),labels=[1,0,0,0], dashes=[10, 5], linewidth=2,  fontsize=20)
+            # m.drawmeridians(np.arange(10,180.0,30.0), dashes=[10, 5], linewidth=2)
+            m.drawmeridians(np.arange(-170.0,170.0,10.0),  linewidth=2)
+        elif projection=='lambert':
+            distEW, az, baz=obspy.geodetics.gps2dist_azimuth(minlat, minlon, minlat, maxlon) # distance is in m
+            distNS, az, baz=obspy.geodetics.gps2dist_azimuth(minlat, minlon, maxlat+2., minlon) # distance is in m
+            m = Basemap(width=distEW, height=distNS, rsphere=(6378137.00,6356752.3142), resolution='l', projection='lcc',\
+                lat_1=minlat, lat_2=maxlat, lon_0=lon_centre, lat_0=lat_centre+1)
+            m.drawparallels(np.arange(-80.0,80.0,10.0), linewidth=1, dashes=[2,2], labels=[1,1,0,0], fontsize=15)
+            m.drawmeridians(np.arange(-170.0,170.0,10.0), linewidth=1, dashes=[2,2], labels=[0,0,1,0], fontsize=15)
+            # m.drawparallels(np.arange(-80.0,80.0,10.0), linewidth=0.5, dashes=[2,2], labels=[1,0,0,0], fontsize=5)
+            # m.drawmeridians(np.arange(-170.0,170.0,10.0), linewidth=0.5, dashes=[2,2], labels=[0,0,0,1], fontsize=5)
+        m.drawcoastlines(linewidth=1.0)
+        m.drawcountries(linewidth=1.)
+        # m.drawmapboundary(fill_color=[1.0,1.0,1.0])
+        m.fillcontinents(lake_color='#99ffff',zorder=0.2)
+        m.drawstates()
+        m.drawmapboundary(fill_color="white")
+        try:
+            geopolygons.PlotPolygon(inbasemap=m)
+        except:
+            pass
+        return m
+    
+            
+    
+    def plot_vel_iso(self, projection='lambert', fastaxis=False, geopolygons=None, showfig=True, vmin=None, vmax=None):
+        """Plot isotropic velocity
+        """
+        m=self._get_basemap(projection=projection, geopolygons=geopolygons)
+        x, y=m(self.lonArr, self.latArr)
+        cmap = colormaps.make_colormap({0.0:[0.1,0.0,0.0], 0.2:[0.8,0.0,0.0], 0.3:[1.0,0.7,0.0],0.48:[0.92,0.92,0.92],
+            0.5:[0.92,0.92,0.92], 0.52:[0.92,0.92,0.92], 0.7:[0.0,0.6,0.7], 0.8:[0.0,0.0,0.8], 1.0:[0.0,0.0,0.1]})
+        im=m.pcolormesh(x, y, self.velArr, cmap=cmap, shading='gouraud', vmin=vmin, vmax=vmax)
+        cb = m.colorbar(im, "bottom", size="3%", pad='2%')
+        # cb.set_label('V'+self.datatype+' (km/s)', fontsize=12, rotation=0)
+        # plt.title(str(self.period)+' sec', fontsize=20)
+        # if fastaxis:
+        #     try:
+        #         self.plot_fast_axis(inbasemap=m)
+        #     except:
+        #         pass
+        if showfig:
+            plt.show()
         
         
     

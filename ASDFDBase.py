@@ -1016,7 +1016,7 @@ class noiseASDF(pyasdf.ASDFDataSet):
         if len(inputStream) > subsize:
             Nsub = int(len(inputStream)/subsize)
             for isub in xrange(Nsub):
-                print isub,'in',Nsub
+                print 'Subset:', isub,'in',Nsub,'sets'
                 cstream=inputStream[isub*subsize:(isub+1)*subsize]
                 AFTAN = partial(aftan4mp, outdir=outdir, inftan=inftan, prephdir=prephdir, f77=f77, pfx=pfx)
                 pool = multiprocessing.Pool(processes=nprocess)
@@ -1088,8 +1088,7 @@ class noiseASDF(pyasdf.ASDFDataSet):
                     if pmf2:
                         parameters={'Tc': 0, 'To': 1, 'Vgr': 2, 'Vph': 3, 'ampdb': 4, 'snrdb': 5, 'mhw': 6, 'amp': 7, 'snr':8, 'Np': nfout2_2}
                         self.add_auxiliary_data(data=arr2_2, data_type='DISPpmf2', path=staid_aux, parameters=parameters)
-        if deletedisp:
-            shutil.rmtree(outdir+'/'+pfx)
+        if deletedisp: shutil.rmtree(outdir+'/'+pfx)
         return
     
     def interp_disp(self, data_type='DISPpmf2', channel='ZZ', pers=np.array([]), verbose=True):

@@ -260,7 +260,7 @@ int main(int na, char *arg[])
                 temp+=weight[k]*(slow[i][j][k]-slow_sum[i][j])*(slow[i][j][k]-slow_sum[i][j]);
             }
             slow_std[i][j]=sqrt(temp/(1-w2));
-            temp=slow_std[i][j]*sqrt(w2)/slow_sum[i][j]/slow_sum[i][j];
+            temp=slow_std[i][j]*sqrt(w2)/slow_sum[i][j]/slow_sum[i][j]; ///
             fprintf(file_iso,"%lf %lf %lf %lf %d\n",x0+i*dx,y0+j*dy,1/slow_sum[i][j],temp,temp_n);
         }
     }

@@ -31,6 +31,8 @@ from matplotlib.mlab import griddata
 import colormaps
 import obspy
 import field2d_earth
+import numexpr
+import warnings
 
 class EikonalTomoDataSet(h5py.File):
     
@@ -61,7 +63,23 @@ class EikonalTomoDataSet(h5py.File):
         self.attrs.create(name = 'Nlat', data=Nlat)
         return
     
-    def xcorr_eikonal(self, inasdffname, workingdir, fieldtype='Tph', channel='ZZ', data_type='FieldDISPpmf2interp', runid=0):
+    def xcorr_eikonal(self, inasdffname, workingdir, fieldtype='Tph', channel='ZZ', data_type='FieldDISPpmf2interp', runid=0, deletetxt=True, verbose=True):
+        """
+        Compute gradient of travel time for cross-correlation data
+        =================================================================================================================
+        Input Parameters:
+        inasdffname - input ASDF data file
+        workingdir  - working directory
+        fieldtype   - fieldtype (Tph or Tgr)
+        channel     - channel for analysis
+        data_type   - data type
+                     (default='FieldDISPpmf2interp', aftan measurements with phase-matched filtering and jump correction)
+        runid       - run id
+        deletetxt   - delete output txt files in working directory
+        =================================================================================================================
+        """
+        if fieldtype!='Tph' and fieldtype!='Tgr':
+            raise ValueError('Wrong field type: '+fieldtype+' !')
         create_group=False
         while (not create_group):
             try:
@@ -70,7 +88,7 @@ class EikonalTomoDataSet(h5py.File):
             except:
                 runid+=1
                 continue
-        group.attrs.create(name = 'fieldtype', data=fieldtype)
+        group.attrs.create(name = 'fieldtype', data=fieldtype[1:])
         inDbase=pyasdf.ASDFDataSet(inasdffname)
         pers = self.attrs['period_array']
         minlon=self.attrs['minlon']
@@ -82,6 +100,7 @@ class EikonalTomoDataSet(h5py.File):
         fdict={ 'Tph': 2, 'Tgr': 3}
         evLst=inDbase.waveforms.list()
         for per in pers:
+            print 'Computing gradient for: '+str(per)+' sec'
             del_per=per-int(per)
             if del_per==0.:
                 persfx=str(int(per))+'sec'
@@ -97,12 +116,13 @@ class EikonalTomoDataSet(h5py.File):
                 except KeyError:
                     print 'No travel time field for: '+evid
                     continue
+                if verbose: print 'Event: '+evid
                 lat1, elv1, lon1=inDbase.waveforms[evid].coordinates.values()
                 if lon1<0.:
                     lon1+=360.
                 dataArr = subdset.data.value
-                field2d=field2d_earth.Field2d(minlon=minlon, maxlon=maxlon, dlon=dlon, minlat=minlat, maxlat=maxlat, dlat=dlat, period=per, fieldtype=fieldtype)
-                # return field2d
+                field2d=field2d_earth.Field2d(minlon=minlon, maxlon=maxlon, dlon=dlon,
+                        minlat=minlat, maxlat=maxlat, dlat=dlat, period=per, fieldtype=fieldtype)
                 Zarr=dataArr[:, fdict[fieldtype]]
                 distArr=dataArr[:, 5]
                 field2d.read_array(lonArr=np.append(lon1, dataArr[:,0]), latArr=np.append(lat1, dataArr[:,1]), ZarrIn=np.append(0., distArr/Zarr) )
@@ -121,13 +141,20 @@ class EikonalTomoDataSet(h5py.File):
                 azdset       = event_group.create_dataset(name='az', data=field2d.az)
                 bazdset      = event_group.create_dataset(name='baz', data=field2d.baz)
                 Tdset        = event_group.create_dataset(name='travelT', data=field2d.Zarr)
-                londset      = event_group.create_dataset(name='lonArr', data=field2d.lonArr)
-                latdset      = event_group.create_dataset(name='latArr', data=field2d.latArr)
-                # return field2d
+        if deletetxt: shutil.rmtree(workingdir)
         return
     
-    def eikonal_stacking(self, runid=0):
-        
+    def eikonal_stack(self, runid=0, minazi=-180, maxazi=180, N_bin=20, anisotropic=False):
+        """
+        Stack gradient results to perform Eikonal Tomography
+        =================================================================================================================
+        Input Parameters:
+        runid           - run id
+        minazi/maxazi   - min/max azimuth for anisotropic parameters determination
+        N_bin           - number of bins for anisotropic parameters determination
+        anisotropic     - perform anisotropic parameters determination or not 
+        =================================================================================================================
+        """
         pers = self.attrs['period_array']
         minlon=self.attrs['minlon']
         maxlon=self.attrs['maxlon']
@@ -138,31 +165,206 @@ class EikonalTomoDataSet(h5py.File):
         Nlon=self.attrs['Nlon']
         Nlat=self.attrs['Nlat']
         group=self['Eikonal_run_'+str(runid)]
-        
+        try:
+            group_out=self.create_group( name = 'Eikonal_stack_'+str(runid) )
+        except ValueError:
+            warnings.warn('Eikonal_stack_'+str(runid)+' exists! Will be recomputed!', UserWarning, stacklevel=1)
+            del self['Eikonal_stack_'+str(runid)]
+            group_out=self.create_group( name = 'Eikonal_stack_'+str(runid) )
+        group_out.attrs.create(name = 'anisotropic', data=anisotropic)
+        group_out.attrs.create(name = 'N_bin', data=N_bin)
+        group_out.attrs.create(name = 'minazi', data=minazi)
+        group_out.attrs.create(name = 'maxazi', data=maxazi)
+        group_out.attrs.create(name = 'fieldtype', data=group.attrs['fieldtype'])
         for per in pers:
+            print 'Stacking Eikonal results for: '+str(per)+' sec'
             per_group=group['%g_sec'%( per )]
-            Treason=np.ones((Nlat-4, Nlon-4))
+            Nevent=len(per_group.keys())
             Nmeasure=np.zeros((Nlat-4, Nlon-4))
-            velArr=np.zeros((Nlat-4, Nlon-4))
-            for evid in per_group.keys():
+            weightArr=np.zeros((Nevent, Nlat-4, Nlon-4))
+            slownessArr=np.zeros((Nevent, Nlat-4, Nlon-4))
+            aziArr=np.zeros((Nevent, Nlat-4, Nlon-4))
+            reason_nArr=np.zeros((Nevent, Nlat-4, Nlon-4))
+            validArr=np.zeros((Nevent, Nlat-4, Nlon-4))
+            for iev in xrange(Nevent):
+                evid=per_group.keys()[iev]
                 event_group=per_group[evid]
                 reason_n=event_group['reason_n'].value
                 appV=event_group['appV'].value
-                velArr[reason_n==0]+=appV[reason_n==0]
+                az=event_group['az'].value
                 oneArr=np.ones((Nlat-4, Nlon-4))
                 oneArr[reason_n!=0]=0
                 Nmeasure+=oneArr
-        velArr[Nmeasure>15]=velArr[Nmeasure>15]/Nmeasure[Nmeasure>15]
-        # self.velArr=velArr
-        self.reason_n=np.zeros((Nlat-4, Nlon-4))
-        self.reason_n[Nmeasure<15]=1
-        self.velArr=self._numpy2ma(velArr)
-        
-        
-        self.lons=np.arange((maxlon-minlon)/dlon-3)*dlon+minlon+2*dlon
-        self.lats=np.arange((maxlat-minlat)/dlat-3)*dlat+minlat+2*dlat
-        self.Nlon=self.lons.size; self.Nlat=self.lats.size
-        self.lonArr, self.latArr = np.meshgrid(self.lons, self.lats)
+                slowness=np.zeros((Nlat-4, Nlon-4))
+                slowness[appV!=0]=1./appV[appV!=0]
+                slownessArr[iev, :, :]=slowness
+                reason_nArr[iev, :, :]=reason_n
+                aziArr[iev, :, :]=az
+            if Nmeasure.max()<15:
+                print 'No enough measurements for: '+str(per)+' sec'
+                continue
+            ###########################################
+            # Get weight for each grid point per event
+            ###########################################
+            azi_event1=np.broadcast_to(aziArr, (Nevent, Nevent, Nlat-4, Nlon-4))
+            azi_event2=np.swapaxes(azi_event1, 0, 1)
+            validArr[reason_nArr==0]=1
+            validArr4=np.broadcast_to(validArr, (Nevent, Nevent, Nlat-4, Nlon-4))
+            # use numexpr for very large array manipulations
+            del_aziArr=numexpr.evaluate('abs(azi_event1-azi_event2)')
+            index_azi=numexpr.evaluate('(1*(del_aziArr<20)+1*(del_aziArr>340))*validArr4')
+            weightArr=numexpr.evaluate('sum(index_azi, 1)')
+            weightArr[reason_nArr!=0]=0
+            #######################################################
+            # # # weightArr2=np.zeros((Nevent, Nlat-4, Nlon-4))
+            # # # for iev in xrange(Nevent):
+            # # #     evid1=per_group.keys()[iev]
+            # # #     event_group1=per_group[evid1]
+            # # #     az1=event_group1['az'].value
+            # # #     reason_n1=event_group1['reason_n'].value
+            # # #     print evid1
+            # # #     for evid2 in per_group.keys():
+            # # #         event_group2=per_group[evid2]
+            # # #         az2=event_group2['az'].value
+            # # #         reason_n2=event_group2['reason_n'].value
+            # # #         del_azi=np.abs(az1-az2)
+            # # #         oneArr=1*((del_azi<20.)+(del_azi>(360.-20.)))
+            # # #         oneArr[reason_n1!=0]=0
+            # # #         oneArr[reason_n2!=0]=0
+            # # #         weightArr2[iev, :, :]+=oneArr
+            # # # return weightArr, weightArr2
+            # # # return
+            weightArr[weightArr!=0]=1./weightArr[weightArr!=0]
+            weightsumArr=np.sum(weightArr, axis=0)
+            ###########################################
+            # reduce large weight to some value.
+            ###########################################
+            avgArr=np.zeros((Nlat-4, Nlon-4))
+            avgArr[Nmeasure!=0]=weightsumArr[Nmeasure!=0]/Nmeasure[Nmeasure!=0]
+            stdArr=np.sum( (weightArr-avgArr)**2, axis=0)
+            stdArr[Nmeasure!=0]=stdArr[Nmeasure!=0]/Nmeasure[Nmeasure!=0]
+            stdArr=np.sqrt(stdArr)
+            threshhold=np.broadcast_to(avgArr+3.*stdArr, weightArr.shape)
+            weightArr[weightArr>threshhold]=threshhold[weightArr>threshhold]
+            ###########################################
+            # Compute mean/std of slowness
+            ###########################################
+            weightsumArr=np.sum(weightArr, axis=0)
+            weightsumArr2=np.broadcast_to(weightsumArr, weightArr.shape)
+            weightArr[weightsumArr2!=0]=weightArr[weightsumArr2!=0]/weightsumArr2[weightsumArr2!=0]
+            slownessArr2=slownessArr*weightArr
+            slowness_sumArr=np.sum(slownessArr2, axis=0)
+            slowness_sumArr2=np.broadcast_to(slowness_sumArr, weightArr.shape)
+            w2sumArr=np.sum(weightArr**2, axis=0)
+            temp=weightArr*(slownessArr-slowness_sumArr2)**2
+            temp=np.sum(temp, axis=0)
+            slowness_stdArr=np.sqrt(temp/(1-w2sumArr))
+            slowness_stdArr2=np.broadcast_to(slowness_stdArr, weightArr.shape)
+            ###########################################
+            # discard outliers of slowness
+            ###########################################
+            weightArrQC=weightArr.copy()
+            index_outlier=(np.abs(slownessArr-slowness_sumArr2))>2*slowness_stdArr2 
+            weightArrQC[index_outlier]=0
+            weightsumArrQC=np.sum(weightArrQC, axis=0)
+            NmArr=np.sign(weightArrQC)
+            NmeasureQC=np.sum(NmArr, axis=0)
+            weightsumArrQC2=np.broadcast_to(weightsumArrQC, weightArr.shape)
+            weightArrQC[weightsumArrQC2!=0]=weightArrQC[weightsumArrQC2!=0]/weightsumArrQC2[weightsumArrQC2!=0]
+            temp=weightArrQC*slownessArr
+            slowness_sumArrQC=np.sum(temp, axis=0)
+            w2sumArrQC=np.sum(weightArrQC**2, axis=0)
+            temp=weightArrQC*(slownessArr-slowness_sumArrQC)**2
+            temp=np.sum(temp, axis=0)
+            slowness_stdArrQC=np.sqrt(temp/(1-w2sumArrQC))
+            # save isotropic velocity to database
+            per_group_out= group_out.create_group( name='%g_sec'%( per ) )
+            sdset        = per_group_out.create_dataset(name='slowness', data=slowness_sumArrQC)
+            s_stddset    = per_group_out.create_dataset(name='slowness_std', data=slowness_stdArrQC)
+            Nmdset       = per_group_out.create_dataset(name='Nmeasure', data=Nmeasure)
+            NmQCdset     = per_group_out.create_dataset(name='NmeasureQC', data=NmeasureQC)
+            #####################################################
+            # determine anisotropic parameters, need benchmark and further verification
+            #####################################################
+            if anisotropic:
+                NmeasureAni=np.zeros((Nlat-4, Nlon-4))
+                total_near_neighbor=Nmeasure[4:-4, 4:-4]+Nmeasure[:-8, :-8]+Nmeasure[8:, 8:]+Nmeasure[:-8, 4:-4]+\
+                        Nmeasure[8:, 4:-4]+Nmeasure[4:-4, :-8]+Nmeasure[4:-4, 8:] + Nmeasure[8:, :-8]+Nmeasure[:-8, 8:]
+                NmeasureAni[4:-4, 4:-4]=total_near_neighbor # for quality control
+                # initialization of anisotropic parameters
+                d_bin=(maxazi-minazi)/N_bin
+                histArr=np.zeros((N_bin, Nlat-4, Nlon-4))
+                histArr_cutted=histArr[:, 3:-3, 3:-3]
+                slow_sum_ani=np.zeros((N_bin, Nlat-4, Nlon-4))
+                slow_sum_ani_cutted=slow_sum_ani[:, 3:-3, 3:-3]
+                slow_un=np.zeros((N_bin, Nlat-4, Nlon-4))
+                slow_un_cutted=slow_un[:, 3:-3, 3:-3]
+                azi_11=aziArr[:, :-6, :-6]; azi_12=aziArr[:, :-6, 3:-3]; azi_13=aziArr[:, :-6, 6:]
+                azi_21=aziArr[:, 3:-3, :-6]; azi_22=aziArr[:, 3:-3, 3:-3]; azi_23=aziArr[:, 3:-3, 6:]
+                azi_31=aziArr[:, 6:, :-6]; azi_32=aziArr[:, 6:, 3:-3]; azi_33=aziArr[:, 6:, 6:]
+                slowsumQC_cutted=slowness_sumArrQC[3:-3, 3:-3]
+                slownessArr_cutted=slownessArr[:, 3:-3, 3:-3]
+                index_outlier_cutted=index_outlier[:, 3:-3, 3:-3]
+                for ibin in xrange(N_bin):
+                    sumNbin=(np.zeros((Nlat-4, Nlon-4)))[3:-3, 3:-3]
+                    slowbin=(np.zeros((Nlat-4, Nlon-4)))[3:-3, 3:-3]
+                    ibin11=np.floor((azi_11-minazi)/d_bin); temp1=1*(ibin==ibin11); temp1[index_outlier_cutted]=0
+                    temp2=temp1*(slownessArr_cutted-slowsumQC_cutted); 
+                    temp1=np.sum(temp1, 0); temp2=np.sum(temp2, 0); #temp2[temp1!=0]=temp2[temp1!=0]/temp1[temp1!=0]
+                    sumNbin+=temp1; slowbin+=temp2; #print temp2.max(), temp2.min() 
+
+                    ibin12=np.floor((azi_12-minazi)/d_bin); temp1=1*(ibin==ibin12); temp1[index_outlier_cutted]=0
+                    temp2=temp1*(slownessArr_cutted-slowsumQC_cutted)
+                    temp1=np.sum(temp1, 0); temp2=np.sum(temp2, 0); sumNbin+=temp1; slowbin+=temp2
+                    
+                    ibin13=np.floor((azi_13-minazi)/d_bin); temp1=1*(ibin==ibin13); temp1[index_outlier_cutted]=0
+                    temp2=temp1*(slownessArr_cutted-slowsumQC_cutted)
+                    temp1=np.sum(temp1, 0); temp2=np.sum(temp2, 0); sumNbin+=temp1; slowbin+=temp2
+                    
+                    ibin21=np.floor((azi_21-minazi)/d_bin); temp1=1*(ibin==ibin21); temp1[index_outlier_cutted]=0
+                    temp2=temp1*(slownessArr_cutted-slowsumQC_cutted)
+                    temp1=np.sum(temp1, 0); temp2=np.sum(temp2, 0); sumNbin+=temp1; slowbin+=temp2
+                    
+                    ibin22=np.floor((azi_22-minazi)/d_bin); temp1=1*(ibin==ibin22); temp1[index_outlier_cutted]=0
+                    temp2=temp1*(slownessArr_cutted-slowsumQC_cutted)
+                    temp1=np.sum(temp1, 0); temp2=np.sum(temp2, 0); sumNbin+=temp1; slowbin+=temp2
+                    
+                    ibin23=np.floor((azi_23-minazi)/d_bin); temp1=1*(ibin==ibin23); temp1[index_outlier_cutted]=0
+                    temp2=temp1*(slownessArr_cutted-slowsumQC_cutted)
+                    temp1=np.sum(temp1, 0); temp2=np.sum(temp2, 0); sumNbin+=temp1; slowbin+=temp2
+                    
+                    ibin31=np.floor((azi_31-minazi)/d_bin); temp1=1*(ibin==ibin31); temp1[index_outlier_cutted]=0
+                    temp2=temp1*(slownessArr_cutted-slowsumQC_cutted)
+                    temp1=np.sum(temp1, 0); temp2=np.sum(temp2, 0); sumNbin+=temp1; slowbin+=temp2
+                    
+                    ibin32=np.floor((azi_32-minazi)/d_bin); temp1=1*(ibin==ibin32); temp1[index_outlier_cutted]=0
+                    temp2=temp1*(slownessArr_cutted-slowsumQC_cutted)
+                    temp1=np.sum(temp1, 0); temp2=np.sum(temp2, 0); sumNbin+=temp1; slowbin+=temp2
+                    
+                    ibin33=np.floor((azi_33-minazi)/d_bin); temp1=1*(ibin==ibin33); temp1[index_outlier_cutted]=0
+                    temp2=temp1*(slownessArr_cutted-slowsumQC_cutted)
+                    temp1=np.sum(temp1, 0); temp2=np.sum(temp2, 0); sumNbin+=temp1; slowbin+=temp2
+                   
+                    histArr_cutted[ibin, :, :]=sumNbin
+                    slow_sum_ani_cutted[ibin, :, :]=slowbin
+                slow_sum_ani_cutted[histArr_cutted>10]=slow_sum_ani_cutted[histArr_cutted>10]/histArr_cutted[histArr_cutted>10]
+                slow_sum_ani_cutted[histArr_cutted<=10]=0
+                slow_iso_std=np.broadcast_to(slowness_stdArrQC[3:-3, 3:-3], histArr_cutted.shape)
+                slow_un_cutted[histArr_cutted>10]=slow_iso_std[histArr_cutted>10]/np.sqrt(histArr_cutted[histArr_cutted>10])
+                slow_un_cutted[histArr_cutted<=10]=0
+                temp=np.broadcast_to(slowsumQC_cutted, slow_un_cutted.shape)
+                temp=( temp + slow_sum_ani_cutted)**2
+                slow_un_cutted=slow_un_cutted/temp
+                slow_sum_ani[:, 3:-3, 3:-3]=slow_sum_ani_cutted
+                slow_un[:, 3:-3, 3:-3]=slow_un_cutted
+                slow_sum_ani[:, NmeasureAni<45]=0 # near neighbor quality control
+                slow_un[:, NmeasureAni<45]=0
+                histArr[:, 3:-3, 3:-3]=histArr_cutted
+                # save data to database
+                s_anidset    = per_group_out.create_dataset(name='slownessAni', data=slow_sum_ani)
+                s_anistddset = per_group_out.create_dataset(name='slownessAni_std', data=slow_un)
+                histdset     = per_group_out.create_dataset(name='histArr', data=histArr)
+                NmAnidset    = per_group_out.create_dataset(name='NmeasureAni', data=NmeasureAni)
         return 
            
     def _numpy2ma(self, inarray, reason_n=None):
@@ -176,19 +378,80 @@ class EikonalTomoDataSet(h5py.File):
             outarray.mask[reason_n!=0]=1
         return outarray     
     
-    def _get_lon_lat_arr(self, dataid):
+    def _get_lon_lat_arr(self, ncut=2):
         """Get longitude/latitude array
         """
         minlon=self.attrs['minlon']
         maxlon=self.attrs['maxlon']
         minlat=self.attrs['minlat']
         maxlat=self.attrs['maxlat']
-        dlon=self[dataid].attrs['dlon']
-        dlat=self[dataid].attrs['dlat']
-        self.lons=np.arange((maxlon-minlon)/dlon+1)*dlon+minlon+2*dlon
-        self.lats=np.arange((maxlat-minlat)/dlat+1)*dlat+minlat+2*dlat
-        self.Nlon=self.lons.size-4; self.Nlat=self.lats.size-4
+        dlon=self.attrs['dlon']
+        dlat=self.attrs['dlat']
+        self.lons=np.arange((maxlon-minlon)/dlon+1-2*ncut)*dlon+minlon+ncut*dlon
+        self.lats=np.arange((maxlat-minlat)/dlat+1-2*ncut)*dlat+minlat+ncut*dlat
+        self.Nlon=self.lons.size; self.Nlat=self.lats.size
         self.lonArr, self.latArr = np.meshgrid(self.lons, self.lats)
+        return
+    
+    def np2ma(self):
+        """Convert numpy data array to masked data array
+        """
+        try:
+            reason_n=self.reason_n
+        except:
+            raise AttrictError('No reason_n array!')
+        self.vel_iso=self._numpy2ma(self.vel_iso)
+        return
+    
+    def get_data4plot(self, period, runid=0, ncut=2, Nmin=15):
+        """
+        Get data for plotting
+        =======================================================================================
+        Input Parameters:
+        period              - period
+        runid               - run id
+        ncut                - number of cutted edge points
+        Nmin                - minimum required number of measurements
+        ---------------------------------------------------------------------------------------
+        generated data arrays:
+        ----------------------------------- isotropic version ---------------------------------
+        self.vel_iso        - isotropic velocity
+        self.slowness_std   - slowness standard deviation
+        self.Nmeasure       - number of measurements at each grid point
+        self.reason_n       - array to represent valid/invalid data points
+        ---------------------------------- anisotropic version --------------------------------
+        include all the array above(but will be converted to masked array), and
+        self.N_bin          - number of bins
+        self.minazi/maxazi  - min/max azimuth
+        self.slownessAni    - anisotropic slowness perturbation categorized for each bin
+        self.slownessAni_std- anisotropic slowness perturbation std
+        self.histArr        - number of measurements for each bins
+        self.NmeasureAni    - number of measurements for near neighbor points
+        =======================================================================================
+        """
+        self._get_lon_lat_arr(ncut=ncut)
+        Nlon=self.attrs['Nlon']
+        Nlat=self.attrs['Nlat']
+        subgroup=self['Eikonal_stack_'+str(runid)+'/%g_sec'%( period )]
+        self.period=period
+        slowness=subgroup['slowness'].value
+        self.vel_iso=np.zeros((Nlat-4, Nlon-4))
+        self.vel_iso[slowness!=0]=1./slowness[slowness!=0]
+        self.Nmeasure=subgroup['Nmeasure'].value
+        self.slowness_std=subgroup['slowness_std'].value
+        self.reason_n=np.zeros((Nlat-4, Nlon-4))
+        self.reason_n[self.Nmeasure<Nmin]=1
+        group=self['Eikonal_stack_'+str(runid)]
+        self.anisotropic=group.attrs['anisotropic']
+        self.fieldtype=group.attrs['fieldtype']
+        if self.anisotropic:
+            self.N_bin=group.attrs['N_bin']
+            self.minazi=group.attrs['minazi']
+            self.maxazi=group.attrs['maxazi']
+            self.slownessAni=subgroup['slownessAni'].value
+            self.slownessAni_std=subgroup['slownessAni_std'].value
+            self.histArr=subgroup['histArr'].value
+            self.NmeasureAni=subgroup['NmeasureAni'].value
         return
     
     def _get_basemap(self, projection='lambert', geopolygons=None, resolution='i'):
@@ -244,17 +507,17 @@ class EikonalTomoDataSet(h5py.File):
     
             
     
-    def plot_vel_iso(self, projection='lambert', fastaxis=False, geopolygons=None, showfig=True, vmin=None, vmax=None):
+    def plot_vel_iso(self, projection='lambert', fastaxis=False, geopolygons=None, showfig=True, vmin=2.9, vmax=3.5):
         """Plot isotropic velocity
         """
         m=self._get_basemap(projection=projection, geopolygons=geopolygons)
         x, y=m(self.lonArr, self.latArr)
         cmap = colormaps.make_colormap({0.0:[0.1,0.0,0.0], 0.2:[0.8,0.0,0.0], 0.3:[1.0,0.7,0.0],0.48:[0.92,0.92,0.92],
             0.5:[0.92,0.92,0.92], 0.52:[0.92,0.92,0.92], 0.7:[0.0,0.6,0.7], 0.8:[0.0,0.0,0.8], 1.0:[0.0,0.0,0.1]})
-        im=m.pcolormesh(x, y, self.velArr, cmap=cmap, shading='gouraud', vmin=vmin, vmax=vmax)
+        im=m.pcolormesh(x, y, self.vel_iso, cmap=cmap, shading='gouraud', vmin=vmin, vmax=vmax)
         cb = m.colorbar(im, "bottom", size="3%", pad='2%')
-        # cb.set_label('V'+self.datatype+' (km/s)', fontsize=12, rotation=0)
-        # plt.title(str(self.period)+' sec', fontsize=20)
+        cb.set_label('V'+self.fieldtype+'(km/s)', fontsize=12, rotation=0)
+        plt.title(str(self.period)+' sec', fontsize=20)
         # if fastaxis:
         #     try:
         #         self.plot_fast_axis(inbasemap=m)

@@ -297,22 +297,22 @@ class InputFtanParam(object): ###
     ===============================================================================================================
     """
     def __init__(self):
-        self.pmf=True
-        self.piover4=-1.0
-        self.vmin=1.5
-        self.vmax=5.0
-        self.tmin=4.0
-        self.tmax=30.0
-        self.tresh=20.0
-        self.ffact=1.0
-        self.taperl=1.0
-        self.snr=0.2
-        self.fmatch=1.0
-        self.fhlen=0.008
-        self.nfin=64
-        self.npoints=3
-        self.perc=50
-        self.predV=np.array([])
+        self.pmf     = True
+        self.piover4 = -1.0
+        self.vmin    = 1.5
+        self.vmax    = 5.0
+        self.tmin    = 4.0
+        self.tmax    = 70.0
+        self.tresh   = 20.0
+        self.ffact   = 1.0
+        self.taperl  = 1.0
+        self.snr     = 0.2
+        self.fmatch  = 1.0
+        self.fhlen   = 0.008
+        self.nfin    = 64
+        self.npoints = 3
+        self.perc    = 50
+        self.predV   = np.array([])
     
 class aftantrace(obspy.core.trace.Trace):
     """

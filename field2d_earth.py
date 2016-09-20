@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.mlab import griddata
@@ -263,12 +263,6 @@ class Field2d(object):
             self.grad=np.gradient( self.Zarr, self.dlat_kmArr, self.dlon_kmArr, edge_order=edge_order)
             self.grad[0]=self.grad[0][1:-1, 1:-1]
             self.grad[1]=self.grad[1][1:-1, 1:-1]
-        elif method=='fft':
-            diff_lon=self.fftDiff2(m=1, n=0)
-            diff_lat=self.fftDiff2(m=0, n=1)
-            self.grad=[]
-            self.grad.append(diff_lat)
-            self.grad.append(diff_lon)
         elif method == 'convolve':
             dlat_km=self.dlat_kmArr
             dlon_km=self.dlon_kmArr
@@ -418,7 +412,7 @@ class Field2d(object):
         os.remove(tempGMT)
         return 
         
-    def gradient_qc(self, workingdir, evlo, evla, inpfx='', nearneighbor=True, cdist=None):
+    def gradient_qc(self, workingdir, evlo, evla, inpfx='', nearneighbor=True, cdist=None, verbose=False):
         """
         Generate Slowness Maps from Travel Time Maps.
         Two interpolated travel time file with different tension will be used for quality control.
@@ -468,7 +462,7 @@ class Field2d(object):
         reason_n = (reason_n.reshape(self.Nlat, self.Nlon))[::-1,:]
         # Nested loop, may need modification to speed the code up
         if nearneighbor:
-            print 'Start near neighbor quality control checking'
+            if verbose: print 'Start near neighbor quality control checking'
             for ilat in xrange(self.Nlat):
                 for ilon in xrange(self.Nlon):
                     if reason_n[ilat, ilon]==1:
@@ -498,8 +492,6 @@ class Field2d(object):
                             continue
                         az, baz, dist = geodist.inv(lon, lat, lon2, lat2) # loninArr/latinArr are initial points
                         dist=dist/1000.
-                        # dist, az, baz=obspy.geodetics.gps2dist_azimuth(lat,lon,lat2,lon2)
-                        # dist=dist/1000.
                         if dist< cdist*2 and dist >= 1:
                             marker_nn=marker_nn-1
                             if marker_nn==0:
@@ -509,7 +501,7 @@ class Field2d(object):
                     if tflag==False:
                         fieldArr[ilat, ilon]=0
                         reason_n[ilat, ilon] = 2
-            print 'End near neighbor quality control checking'
+            if verbose: print 'End near neighbor quality control checking'
         # Start to Compute Gradient
         self.Zarr=fieldArr
         self.gradient('default')
@@ -528,7 +520,7 @@ class Field2d(object):
         if self.fieldtype=='Tph' or self.fieldtype=='Tgr':
             reason_n[(slowness>0.6)*(reason_n==0)]=3
             reason_n[(slowness<0.2)*(reason_n==0)]=3
-        print 'Computing deflections'
+        if verbose: print 'Computing deflections'
         indexvalid=np.where(reason_n==0)
         diffaArr=np.zeros(reason_n.shape)
         latinArr=self.lat[indexvalid[0]]
@@ -680,10 +672,6 @@ class Field2d(object):
         lplcC.mask[self.reason_n!=0]=1
         x, y=m(self.lonArr, self.latArr)
         cmap =discrete_cmap(int((vmax-vmin)*80)/2+1, 'seismic')
-        # cmap =discrete_cmap(int((vmax-vmin)*1000)/2+1, 'seismic')
-        # cmap=pycpt.load.gmtColormap('./GMT_panoply.cpt')
-        # cmap =discrete_cmap(int((vmax-vmin)*1000), 'seismic'2
-        # cmap = colors.get_colormap('tomo_80_perc_linear_lightness')
         im=m.pcolormesh(x, y, lplcC, cmap=cmap, shading='gouraud', vmin=vmin, vmax=vmax)
         cb = m.colorbar(im, "right", size="3%", pad='2%')
         cb.ax.tick_params(labelsize=5)
@@ -763,33 +751,6 @@ class Field2d(object):
         az, baz, distevent = geodist.inv(self.lonArr, self.latArr, evloArr, evlaArr)
         distevent=distevent/1000.
         self.distArr=distevent
-        return
-    
-    
-    def reset_reason(self, dist):
-        self.reason_n=np.zeros(self.Zarr.shape)
-        # self.reason_n[self.distArr>dist]=7
-        self.reason_n[self.distArr<dist]=7
-        self.reason_n[self.reason_n==5]=0
-        # evlo=129.0
-        # evla=41.306
-        # evloArr=np.ones(self.lonArr.shape)*evlo
-        # evlaArr=np.ones(self.lonArr.shape)*evla
-        # g = Geod(ellps='WGS84')
-        # az, baz, distevent = geodist.inv(self.lonArr, self.latArr, evloArr, evlaArr)
-        # distevent=distevent/1000.
-        # self.dd=distevent
-        # self.reason_n[self.lonArr<90.]=6
-        # self.reason_n[(self.lonArr<100.)*(self.latArr<30.)]=6
-        # self.reason_n[(self.lonArr<100.)*(self.latArr<30.)]=6
-        # self.reason_n[(self.latArr<23.)]=6
-        # self.reason_n[(self.latArr<25.)*(self.lonArr>110.)]=6
-        # self.reason_n[(self.latArr<30.)*(self.lonArr>120.)]=6
-        # self.reason_n[(self.latArr<35.)*(self.lonArr>130.)]=6
-        # self.reason_n[(self.lonArr>132.)]=6
-        # self.reason_n[(self.lonArr>132.)]=6
-        # self.reason_n[(self.latArr>43.)*(self.lonArr<=120.)]=6
-        # self.reason_n[(self.latArr>48.)*(self.lonArr>120.)]=6
         return
             
                 

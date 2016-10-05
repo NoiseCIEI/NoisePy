@@ -58,7 +58,7 @@ class Field2d(object):
     in lons[i, j] or lats[i, j],  i->lat, j->lon
     ===========================================================================
     """
-    def __init__(self, minlon, maxlon, dlon, minlat, maxlat, dlat, period, fieldtype='Tph'):
+    def __init__(self, minlon, maxlon, dlon, minlat, maxlat, dlat, period, evlo=float('inf'), evla=float('inf'), fieldtype='Tph', evid=''):
         self.Nlon=int(round((maxlon-minlon)/dlon)+1)
         self.Nlat=int(round((maxlat-minlat)/dlat)+1)
         self.dlon=dlon
@@ -72,8 +72,11 @@ class Field2d(object):
         self.maxlat=self.lat.max()
         self._get_dlon_dlat_km()
         self.period=period
+        self.evid=evid
         self.fieldtype=fieldtype
         self.Zarr=np.zeros((self.Nlat, self.Nlon))
+        self.evlo=evlo
+        self.evla=evla
         return
     
     def copy(self):
@@ -82,7 +85,6 @@ class Field2d(object):
     def _get_dlon_dlat_km_slow(self):
         """Get longitude and latitude interval in km
         """
-
         self.dlon_km=np.array([])
         self.dlat_km=np.array([])
         for lat in self.lat:
@@ -289,13 +291,15 @@ class Field2d(object):
         self.appV = 1./slowness
         return
     
-    def Laplacian(self, method='convolve', order=4, verbose=False):
+    def Laplacian(self, method='green', order=4, verbose=False):
         """Compute Laplacian of the field
         =============================================================================================================
         Input Parameters:
         edge_order  - edge_order : {1, 2}, optional, only has effect when method='default'
                         Gradient is calculated using Nth order accurate differences at the boundaries
-        method      - method: 'default' : use numpy.gradient 'convolve': use convolution
+        method      - method: 'default' : use numpy.gradient
+                              'convolve': use convolution
+                              'green'   : use Green's theorem( 2D Gauss's theorem )
         order       - order of finite difference scheme, only has effect when method='convolve'
         =============================================================================================================
         """
@@ -323,9 +327,40 @@ class Field2d(object):
                 diff2_lat=convolve(Zarr, lat_diff2_weight_6)/dlat_km/dlat_km
             self.lplc=diff2_lon+diff2_lat
             self.lplc=self.lplc[1:-1, 1:-1]
+        elif method=='green':
+            try:
+                grad_y=self.grad[0]; grad_x=self.grad[1]
+            except:
+                self.gradient('default'); self.cut_edge(1,1)
+                grad_y=self.grad[0]; grad_x=self.grad[1]
+            grad_xp=grad_x[1:-1, 2:];  grad_xn=grad_x[1:-1, :-2]
+            grad_yp=grad_y[2:, 1:-1];  grad_yn=grad_y[:-2, 1:-1]
+            dlat_km=self.dlat_kmArr[1:-1, 1:-1]; dlon_km=self.dlon_kmArr[1:-1, 1:-1]
+            loopsum=(grad_xp - grad_xn)*dlat_km + (grad_yp - grad_yn)*dlon_km
+            area=dlat_km*dlon_km
+            lplc = loopsum/area
+            self.lplc=lplc
         if verbose:
             print 'max lplc:',self.lplc.max(), 'min lplc:',self.lplc.min()
         return
+    
+    
+    def Laplacian_Green(self):
+        """Compute Laplacian of the field using Green's theorem( 2D Gauss's theorem )
+        """
+        try:
+            grad_y=self.grad[0]; grad_x=self.grad[1]
+        except:
+            self.gradient('default'); self.cut_edge(1,1)
+            grad_y=self.grad[0]; grad_x=self.grad[1]
+        grad_xp=grad_x[1:-1, 2:];  grad_xn=grad_x[1:-1, :-2]
+        grad_yp=grad_y[2:, 1:-1];  grad_yn=grad_y[:-2, 1:-1]
+        dlat_km=self.dlat_kmArr[1:-1, 1:-1]; dlon_km=self.dlon_kmArr[1:-1, 1:-1]
+        loopsum=(grad_xp - grad_xn)*dlat_km + (grad_yp - grad_yn)*dlon_km
+        area=dlat_km*dlon_km
+        lplc = loopsum/area
+        self.lplc=lplc
+        return 
     
     def interp_surface(self, workingdir, outfname, tension=0.0):
         """Interpolate input data to grid point with gmt surface command
@@ -412,7 +447,11 @@ class Field2d(object):
         os.remove(tempGMT)
         return 
         
+<<<<<<< HEAD
+    def gradient_qc(self, workingdir, inpfx='', nearneighbor=True, cdist=None, verbose=False):
+=======
     def gradient_qc(self, workingdir, evlo, evla, inpfx='', nearneighbor=True, cdist=None, verbose=False):
+>>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
         """
         Generate Slowness Maps from Travel Time Maps.
         Two interpolated travel time file with different tension will be used for quality control.
@@ -422,7 +461,6 @@ class Field2d(object):
         evlo, evla      - event location
         nearneighbor    - do near neighbor quality control or not
         cdist           - distance for quality control, default is 12*period
-        
         Output format:
         outdir/slow_azi_stacode.pflag.txt.HD.2.v2 - Slowness map
         ---------------------------------------------------------------------------------------------------------------------
@@ -431,6 +469,7 @@ class Field2d(object):
         """
         if cdist==None:
             cdist=12.*self.period
+        evlo=self.evlo; evla=self.evla
         # Read data,
         # v1: data that pass check_curvature criterion
         # v1HD and v1HD02: interpolated v1 data with tension = 0. and 0.2
@@ -557,6 +596,10 @@ class Field2d(object):
         return
     
     
+    def write_binary(self, outfname):
+        np.savez( outfname, self.appV, self.reason_n, self.proAngle, self.az, self.baz, self.Zarr )
+        return
+
     def _get_basemap(self, projection='lambert', geopolygons=None, resolution='i'):
         """Plot data with contour
         """

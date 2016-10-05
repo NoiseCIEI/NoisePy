@@ -7,7 +7,7 @@ class GeoPolygon(object):
         self.lonArr=np.array([]);
         self.latArr=np.array([]);
         
-    def PlotPolygon(self, inbasemap, alpha=0.7, hatch='x'):
+    def PlotPolygon(self, inbasemap, alpha=1, hatch='x'):
         
         x, y = inbasemap(self.lonArr, self.latArr);
         basinArr=np.append(x,y);
@@ -18,10 +18,10 @@ class GeoPolygon(object):
         #             alpha=alpha, closed=True, fill=False, hatch=hatch, lw=2);
         # poly=Polygon(basinArr, edgecolor= 'r',\
         #             alpha=None, closed=True, fill=False, hatch=hatch, lw=2)
-        poly=Polygon(basinArr, edgecolor= 'k',\
-                    alpha=alpha, closed=True, fill=False, hatch=hatch, lw=2)
-        # poly=Polygon(basinArr, edgecolor='k',\
-        #             alpha=None, closed=True, fill=False, hatch=hatch, lw=2);
+        # poly=Polygon(basinArr, edgecolor= 'k',\
+        #             alpha=alpha, closed=True, fill=False, hatch=hatch, lw=2)
+        poly=Polygon(basinArr, edgecolor='k',\
+                    alpha=None, closed=True, fill=False, hatch=hatch, lw=2)
         plt.gca().add_patch(poly)
         return
 

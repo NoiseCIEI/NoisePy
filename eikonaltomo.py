@@ -33,6 +33,12 @@ import obspy
 import field2d_earth
 import numexpr
 import warnings
+<<<<<<< HEAD
+from functools import partial
+import multiprocessing
+
+=======
+>>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
 
 class EikonalTomoDataSet(h5py.File):
     
@@ -122,15 +128,18 @@ class EikonalTomoDataSet(h5py.File):
                     lon1+=360.
                 dataArr = subdset.data.value
                 field2d=field2d_earth.Field2d(minlon=minlon, maxlon=maxlon, dlon=dlon,
+<<<<<<< HEAD
+                        minlat=minlat, maxlat=maxlat, dlat=dlat, period=per, evlo=lon1, evla=lat1, fieldtype=fieldtype)
+=======
                         minlat=minlat, maxlat=maxlat, dlat=dlat, period=per, fieldtype=fieldtype)
+>>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
                 Zarr=dataArr[:, fdict[fieldtype]]
                 distArr=dataArr[:, 5]
                 field2d.read_array(lonArr=np.append(lon1, dataArr[:,0]), latArr=np.append(lat1, dataArr[:,1]), ZarrIn=np.append(0., distArr/Zarr) )
                 outfname=evid+'_'+fieldtype+'_'+channel+'.lst'
                 field2d.interp_surface(workingdir=working_per, outfname=outfname)
                 field2d.check_curvature(workingdir=working_per, outpfx=evid+'_'+channel+'_')
-                field2d.gradient_qc(workingdir=working_per, evlo=lon1, evla=lat1, inpfx=evid+'_'+channel+'_', nearneighbor=True, cdist=None)
-                field2d.evlo=lon1; field2d.evla=lat1
+                field2d.gradient_qc(workingdir=working_per, inpfx=evid+'_'+channel+'_', nearneighbor=True, cdist=None)
                 # save data to hdf5 dataset
                 event_group=per_group.create_group(name=evid)
                 event_group.attrs.create(name = 'evlo', data=lon1)
@@ -144,6 +153,126 @@ class EikonalTomoDataSet(h5py.File):
         if deletetxt: shutil.rmtree(workingdir)
         return
     
+<<<<<<< HEAD
+    def xcorr_eikonal_mp(self, inasdffname, workingdir, fieldtype='Tph', channel='ZZ', data_type='FieldDISPpmf2interp', runid=0,
+                deletetxt=True, verbose=True, subsize=1000, nprocess=None):
+        """
+        Compute gradient of travel time for cross-correlation data with multiprocessing
+        =================================================================================================================
+        Input Parameters:
+        inasdffname - input ASDF data file
+        workingdir  - working directory
+        fieldtype   - fieldtype (Tph or Tgr)
+        channel     - channel for analysis
+        data_type   - data type
+                     (default='FieldDISPpmf2interp', aftan measurements with phase-matched filtering and jump correction)
+        runid       - run id
+        deletetxt   - delete output txt files in working directory
+        subsize     - subsize of processing list, use to prevent lock in multiprocessing process
+        nprocess    - number of processes
+        =================================================================================================================
+        """
+        if fieldtype!='Tph' and fieldtype!='Tgr':
+            raise ValueError('Wrong field type: '+fieldtype+' !')
+        create_group=False
+        while (not create_group):
+            try:
+                group=self.create_group( name = 'Eikonal_run_'+str(runid) )
+                create_group=True
+            except:
+                runid+=1
+                continue
+        group.attrs.create(name = 'fieldtype', data=fieldtype[1:])
+        inDbase=pyasdf.ASDFDataSet(inasdffname)
+        pers = self.attrs['period_array']
+        minlon=self.attrs['minlon']
+        maxlon=self.attrs['maxlon']
+        minlat=self.attrs['minlat']
+        maxlat=self.attrs['maxlat']
+        dlon=self.attrs['dlon']
+        dlat=self.attrs['dlat']
+        fdict={ 'Tph': 2, 'Tgr': 3}
+        evLst=inDbase.waveforms.list()
+        fieldLst=[]
+        # prepare data
+        for per in pers:
+            print 'Preparing data for gradient computation of '+str(per)+' sec'
+            del_per=per-int(per)
+            if del_per==0.:
+                persfx=str(int(per))+'sec'
+            else:
+                dper=str(del_per)
+                persfx=str(int(per))+'sec'+dper.split('.')[1]
+            working_per=workingdir+'/'+str(per)+'sec'
+            if not os.path.isdir(working_per): os.makedirs(working_per)
+            for evid in evLst:
+                netcode1, stacode1=evid.split('.')
+                try:
+                    subdset = inDbase.auxiliary_data[data_type][netcode1][stacode1][channel][persfx]
+                except KeyError:
+                    print 'No travel time field for: '+evid
+                    continue
+                lat1, elv1, lon1=inDbase.waveforms[evid].coordinates.values()
+                if lon1<0.:
+                    lon1+=360.
+                dataArr = subdset.data.value
+                field2d=field2d_earth.Field2d(minlon=minlon, maxlon=maxlon, dlon=dlon, minlat=minlat, maxlat=maxlat, dlat=dlat,
+                        period=per, evlo=lon1, evla=lat1, fieldtype=fieldtype, evid=evid)
+                Zarr=dataArr[:, fdict[fieldtype]]
+                distArr=dataArr[:, 5]
+                field2d.read_array(lonArr=np.append(lon1, dataArr[:,0]), latArr=np.append(lat1, dataArr[:,1]), ZarrIn=np.append(0., distArr/Zarr) )
+                fieldLst.append(field2d)
+        # Computing gradient with multiprocessing
+        if len(fieldLst) > subsize:
+            Nsub = int(len(fieldLst)/subsize)
+            for isub in xrange(Nsub):
+                print 'Subset:', isub,'in',Nsub,'sets'
+                cfieldLst=fieldLst[isub*subsize:(isub+1)*subsize]
+                EIKONAL = partial(eikonal4mp, workingdir=workingdir, channel=channel)
+                pool = multiprocessing.Pool(processes=nprocess)
+                pool.map(EIKONAL, cfieldLst) #make our results with a map call
+                pool.close() #we are not adding any more processes
+                pool.join() #tell it to wait until all threads are done before going on
+            cfieldLst=fieldLst[(isub+1)*subsize:]
+            EIKONAL = partial(eikonal4mp, workingdir=workingdir, channel=channel)
+            pool = multiprocessing.Pool(processes=nprocess)
+            pool.map(EIKONAL, cfieldLst) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        else:
+            EIKONAL = partial(eikonal4mp, workingdir=workingdir, channel=channel)
+            pool = multiprocessing.Pool(processes=nprocess)
+            pool.map(EIKONAL, fieldLst) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        # Read data into hdf5 dataset
+        for per in pers:
+            print 'Reading gradient data for: '+str(per)+' sec'
+            working_per=workingdir+'/'+str(per)+'sec'
+            per_group=group.create_group( name='%g_sec'%( per ) )
+            for evid in evLst:
+                infname=working_per+'/'+evid+'_field2d.npz'
+                if not os.path.isfile(infname): print 'No data for:', evid; continue
+                InArr=np.load(infname)
+                appV=InArr['arr_0']; reason_n=InArr['arr_1']; proAngle=InArr['arr_2']
+                az=InArr['arr_3']; baz=InArr['arr_4']; Zarr=InArr['arr_5']
+                lat1, elv1, lon1=inDbase.waveforms[evid].coordinates.values()
+                # save data to hdf5 dataset
+                event_group=per_group.create_group(name=evid)
+                event_group.attrs.create(name = 'evlo', data=lon1)
+                event_group.attrs.create(name = 'evla', data=lat1)
+                appVdset     = event_group.create_dataset(name='appV', data=appV)
+                reason_ndset = event_group.create_dataset(name='reason_n', data=reason_n)
+                proAngledset = event_group.create_dataset(name='proAngle', data=proAngle)
+                azdset       = event_group.create_dataset(name='az', data=az)
+                bazdset      = event_group.create_dataset(name='baz', data=baz)
+                Tdset        = event_group.create_dataset(name='travelT', data=Zarr)
+        if deletetxt: shutil.rmtree(workingdir)
+        return
+    
+    
+=======
+>>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
     def eikonal_stack(self, runid=0, minazi=-180, maxazi=180, N_bin=20, anisotropic=False):
         """
         Stack gradient results to perform Eikonal Tomography
@@ -215,6 +344,8 @@ class EikonalTomoDataSet(h5py.File):
             index_azi=numexpr.evaluate('(1*(del_aziArr<20)+1*(del_aziArr>340))*validArr4')
             weightArr=numexpr.evaluate('sum(index_azi, 1)')
             weightArr[reason_nArr!=0]=0
+<<<<<<< HEAD
+=======
             #######################################################
             # # # weightArr2=np.zeros((Nevent, Nlat-4, Nlon-4))
             # # # for iev in xrange(Nevent):
@@ -234,6 +365,7 @@ class EikonalTomoDataSet(h5py.File):
             # # #         weightArr2[iev, :, :]+=oneArr
             # # # return weightArr, weightArr2
             # # # return
+>>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
             weightArr[weightArr!=0]=1./weightArr[weightArr!=0]
             weightsumArr=np.sum(weightArr, axis=0)
             ###########################################
@@ -527,4 +659,17 @@ class EikonalTomoDataSet(h5py.File):
             plt.show()
         
         
+<<<<<<< HEAD
+
+def eikonal4mp(infield, workingdir, channel):
+    working_per=workingdir+'/'+str(infield.period)+'sec'
+    outfname=infield.evid+'_'+infield.fieldtype+'_'+channel+'.lst'
+    infield.interp_surface(workingdir=working_per, outfname=outfname)
+    infield.check_curvature(workingdir=working_per, outpfx=infield.evid+'_'+channel+'_')
+    infield.gradient_qc(workingdir=working_per, inpfx=infield.evid+'_'+channel+'_', nearneighbor=True, cdist=None)
+    outfname_npz=working_per+'/'+infield.evid+'_field2d'
+    infield.write_binary(outfname=outfname_npz)
+    return 
+=======
     
+>>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134

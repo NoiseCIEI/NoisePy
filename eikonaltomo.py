@@ -33,12 +33,10 @@ import obspy
 import field2d_earth
 import numexpr
 import warnings
-<<<<<<< HEAD
 from functools import partial
 import multiprocessing
 
-=======
->>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
+
 
 class EikonalTomoDataSet(h5py.File):
     
@@ -128,11 +126,9 @@ class EikonalTomoDataSet(h5py.File):
                     lon1+=360.
                 dataArr = subdset.data.value
                 field2d=field2d_earth.Field2d(minlon=minlon, maxlon=maxlon, dlon=dlon,
-<<<<<<< HEAD
                         minlat=minlat, maxlat=maxlat, dlat=dlat, period=per, evlo=lon1, evla=lat1, fieldtype=fieldtype)
-=======
-                        minlat=minlat, maxlat=maxlat, dlat=dlat, period=per, fieldtype=fieldtype)
->>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
+                        # minlat=minlat, maxlat=maxlat, dlat=dlat, period=per, fieldtype=fieldtype)
+
                 Zarr=dataArr[:, fdict[fieldtype]]
                 distArr=dataArr[:, 5]
                 field2d.read_array(lonArr=np.append(lon1, dataArr[:,0]), latArr=np.append(lat1, dataArr[:,1]), ZarrIn=np.append(0., distArr/Zarr) )
@@ -153,7 +149,6 @@ class EikonalTomoDataSet(h5py.File):
         if deletetxt: shutil.rmtree(workingdir)
         return
     
-<<<<<<< HEAD
     def xcorr_eikonal_mp(self, inasdffname, workingdir, fieldtype='Tph', channel='ZZ', data_type='FieldDISPpmf2interp', runid=0,
                 deletetxt=True, verbose=True, subsize=1000, nprocess=None):
         """
@@ -271,8 +266,6 @@ class EikonalTomoDataSet(h5py.File):
         return
     
     
-=======
->>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
     def eikonal_stack(self, runid=0, minazi=-180, maxazi=180, N_bin=20, anisotropic=False):
         """
         Stack gradient results to perform Eikonal Tomography
@@ -344,8 +337,6 @@ class EikonalTomoDataSet(h5py.File):
             index_azi=numexpr.evaluate('(1*(del_aziArr<20)+1*(del_aziArr>340))*validArr4')
             weightArr=numexpr.evaluate('sum(index_azi, 1)')
             weightArr[reason_nArr!=0]=0
-<<<<<<< HEAD
-=======
             #######################################################
             # # # weightArr2=np.zeros((Nevent, Nlat-4, Nlon-4))
             # # # for iev in xrange(Nevent):
@@ -365,7 +356,6 @@ class EikonalTomoDataSet(h5py.File):
             # # #         weightArr2[iev, :, :]+=oneArr
             # # # return weightArr, weightArr2
             # # # return
->>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
             weightArr[weightArr!=0]=1./weightArr[weightArr!=0]
             weightsumArr=np.sum(weightArr, axis=0)
             ###########################################
@@ -658,8 +648,6 @@ class EikonalTomoDataSet(h5py.File):
         if showfig:
             plt.show()
         
-        
-<<<<<<< HEAD
 
 def eikonal4mp(infield, workingdir, channel):
     working_per=workingdir+'/'+str(infield.period)+'sec'
@@ -670,6 +658,4 @@ def eikonal4mp(infield, workingdir, channel):
     outfname_npz=working_per+'/'+infield.evid+'_field2d'
     infield.write_binary(outfname=outfname_npz)
     return 
-=======
-    
->>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
+

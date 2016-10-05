@@ -447,11 +447,7 @@ class Field2d(object):
         os.remove(tempGMT)
         return 
         
-<<<<<<< HEAD
     def gradient_qc(self, workingdir, inpfx='', nearneighbor=True, cdist=None, verbose=False):
-=======
-    def gradient_qc(self, workingdir, evlo, evla, inpfx='', nearneighbor=True, cdist=None, verbose=False):
->>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
         """
         Generate Slowness Maps from Travel Time Maps.
         Two interpolated travel time file with different tension will be used for quality control.

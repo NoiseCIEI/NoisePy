@@ -6,7 +6,7 @@ dset=ASDFDBase.noiseASDF('../COR_WUS.h5')
 # dset.read_xcorr('/work3/leon/ancc-1.0-0', pfx='COR')
 # dset.xcorr_prephp(outdir='/work3/leon/PRE_PHP', mapfile='./MAPS/smpkolya_phv')
 
-<<<<<<< HEAD
+
 # try:
 #     del dset.auxiliary_data.DISPbasic1
 # except:
@@ -35,7 +35,7 @@ dset=ASDFDBase.noiseASDF('../COR_WUS.h5')
 #     del dset.auxiliary_data.FieldDISPpmf2interp
 # except:
 #     pass
-=======
+
 try:
     del dset.auxiliary_data.DISPbasic1
 except:
@@ -60,7 +60,7 @@ except:
     pass
 dset.interp_disp()
 # dset.xcorr_raytomoinput(outdir='./ray_tomo_data')
->>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
+
 # dset.xcorr_get_field()
 
 
@@ -80,7 +80,6 @@ dset.run_qc(outdir='./ray_tomo_working_dir', isotropic=True, anipara=1, alphaAni
 # dset.plot_global_map(period=50., inglbpfx='./MAPS/smpkolya_phv_R')
 
 
-<<<<<<< HEAD
 # 
 # import eikonaltomo
 # # # 
@@ -100,7 +99,7 @@ dset.run_qc(outdir='./ray_tomo_working_dir', isotropic=True, anipara=1, alphaAni
 # dset.np2ma()
 # dset.plot_vel_iso(vmin=3.7, vmax=4.2)
 # # dset.plot_vel_iso(vmin=2.9, vmax=3.5)
-=======
+
 
 # import eikonaltomo
 # # 
@@ -118,5 +117,5 @@ dset.run_qc(outdir='./ray_tomo_working_dir', isotropic=True, anipara=1, alphaAni
 # dset.get_data4plot(period=24.)
 # dset.np2ma()
 # dset.plot_vel_iso(vmin=3.4, vmax=4.0)
->>>>>>> 0cf843de537ae631abb609e020745c6b97cf1134
+
 

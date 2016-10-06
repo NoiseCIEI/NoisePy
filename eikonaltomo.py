@@ -337,25 +337,6 @@ class EikonalTomoDataSet(h5py.File):
             index_azi=numexpr.evaluate('(1*(del_aziArr<20)+1*(del_aziArr>340))*validArr4')
             weightArr=numexpr.evaluate('sum(index_azi, 1)')
             weightArr[reason_nArr!=0]=0
-            #######################################################
-            # # # weightArr2=np.zeros((Nevent, Nlat-4, Nlon-4))
-            # # # for iev in xrange(Nevent):
-            # # #     evid1=per_group.keys()[iev]
-            # # #     event_group1=per_group[evid1]
-            # # #     az1=event_group1['az'].value
-            # # #     reason_n1=event_group1['reason_n'].value
-            # # #     print evid1
-            # # #     for evid2 in per_group.keys():
-            # # #         event_group2=per_group[evid2]
-            # # #         az2=event_group2['az'].value
-            # # #         reason_n2=event_group2['reason_n'].value
-            # # #         del_azi=np.abs(az1-az2)
-            # # #         oneArr=1*((del_azi<20.)+(del_azi>(360.-20.)))
-            # # #         oneArr[reason_n1!=0]=0
-            # # #         oneArr[reason_n2!=0]=0
-            # # #         weightArr2[iev, :, :]+=oneArr
-            # # # return weightArr, weightArr2
-            # # # return
             weightArr[weightArr!=0]=1./weightArr[weightArr!=0]
             weightsumArr=np.sum(weightArr, axis=0)
             ###########################################

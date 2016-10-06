@@ -98,7 +98,7 @@ class Field2d(object):
     
     def  _get_dlon_dlat_km(self):
         az, baz, dist_lon = geodist.inv(np.zeros(self.lat.size), self.lat, np.ones(self.lat.size)*self.dlon, self.lat) 
-        az, baz, dist_lat = geodist.inv(self.lat, np.zeros(self.lat.size), self.lat+self.dlat, np.zeros(self.lat.size)) 
+        az, baz, dist_lat = geodist.inv(np.zeros(self.lat.size), self.lat, np.zeros(self.lat.size), self.lat+self.dlat) 
         self.dlon_km=dist_lon/1000.
         self.dlat_km=dist_lat/1000.
         self.dlon_kmArr=(np.tile(self.dlon_km, self.Nlon).reshape(self.Nlon, self.Nlat)).T

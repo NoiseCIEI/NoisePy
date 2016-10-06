@@ -1460,35 +1460,32 @@ class aftantrace(obspy.core.trace.Trace):
             g_vel=fparam.arr2_2[2,:]
             snrArr=np.ones(o_per.size)*-1.
             for i in xrange(fparam.nfout2_2):
-                if g_vel[i]<0 or o_per[i]<0:
-                    continue
+                if g_vel[i]<0 or o_per[i]<0: continue
                 filtered_tr=self.gaussian_filter_aftan(1./o_per[i], ffact=ffact)
                 minT = dist/g_vel[i]-o_per[i]/2.
                 maxT = dist/g_vel[i]+o_per[i]/2.
-                if(minT<begT):
-                    minT=begT
-                if(maxT>endT):
-                    maxT=endT
+                if(minT<begT): minT=begT
+                if(maxT>endT): maxT=endT
                 # Noise window
                 minT = maxT + o_per[i] * 5. + 500.
                 skipflag=False
-                if( (endT - minT) < 50. ):
-                    skipflag=True
+                if( (endT - minT) < 50. ): skipflag=True
                 elif( (endT - minT) < 1100. ):
                     maxT = endT - 10.
                 else:
                     minT = endT - 1100.
                     maxT = endT - 100.
                 if not skipflag:
-                    ib = (int)(minT/dt)
-                    ie = (int)(maxT/dt)+2
+                    ib = (int)((minT-begT)/dt)
+                    ie = (int)((maxT-begT)/dt)+2
                     tempnoise=filtered_tr[ib:ie]
                     noiserms=np.sqrt(( np.sum(tempnoise**2))/(ie-ib-1.) )
                     amp=self.ftanparam.arr2_2[7,i]
-                    snrArr[i]=amp/noiserms
+                    if noiserms!=0.: snrArr[i]=amp/noiserms
+                    else: snrArr[i]=1.
             self.ftanparam.arr2_2=np.append(fparam.arr2_2, snrArr)
             self.ftanparam.arr2_2=self.ftanparam.arr2_2.reshape(9, o_per.size)
-        return
+        return 
                 
                     
         

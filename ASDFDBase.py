@@ -1570,7 +1570,12 @@ class quakeASDF(pyasdf.ASDFDataSet):
             except:
                 catalog=catISC
         else: catalog=catISC
-        self.add_quakeml(catalog)
+        outcatalog=obspy.core.event.Catalog()
+        # check magnitude
+        for event in catalog:
+            if event.magnitudes[0].mag < Mmin: continue
+            outcatalog.append(event)
+        self.add_quakeml(outcatalog)
         return
     
     def get_stations(self, startdate=None, enddate=None,  network=None, station=None, location=None, channel=None,
@@ -1615,7 +1620,7 @@ class quakeASDF(pyasdf.ASDFDataSet):
         self.inv=inv
         return 
     
-    def get_surf_waveforms(self, lon0=None, lat0=None, minDelta=-1, maxDelta=181, channel='LHZ', vmax=6.0, vmin=1.0, verbose=True):
+    def get_surf_waveforms(self, lon0=None, lat0=None, minDelta=-1, maxDelta=181, channel='LHZ', vmax=6.0, vmin=1.0, verbose=False):
         """Get surface wave data from IRIS server
         ====================================================================================================================
         Input Parameters:
@@ -1635,7 +1640,7 @@ class quakeASDF(pyasdf.ASDFDataSet):
             event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
             evnumb+=1
             print '================================= Getting surface wave data ==================================='
-            print 'Event: '+event_descrip+', '+Mtype+' = '+str(magnitude) 
+            print 'Event ' + str(evnumb)+' : '+event_descrip+', '+Mtype+' = '+str(magnitude) 
             st=obspy.Stream()
             otime=event.origins[0].time
             evlo=event.origins[0].longitude; evla=event.origins[0].latitude
@@ -1662,12 +1667,12 @@ class quakeASDF(pyasdf.ASDFDataSet):
                     if verbose: print 'No data for:', staid
                     pass
                 if verbose: print 'Getting data for:', staid
+            print '===================================== Removing response ======================================='
             pre_filt = (0.001, 0.005, 1, 100.0)
             st.detrend()
             st.remove_response(pre_filt=pre_filt, taper_fraction=0.1)
             tag='surf_ev_%05d' %evnumb
             self.add_waveforms(st, tag=tag)
-            print '===================================== Removing response ======================================='
         return
             
     def array_processing(self, evnumb=1, win_len=20., win_frac=0.2, sll_x=-3.0, slm_x=3.0, sll_y=-3.0, slm_y=3.0, sl_s=0.03,
@@ -2129,44 +2134,28 @@ class quakeASDF(pyasdf.ASDFDataSet):
         """
         if pers.size==0:
             pers=np.append( np.arange(7.)*2.+28., np.arange(6.)*5.+45.)
-        outindex={ 'longitude': 0, 'latitude': 1, 'Vph': 2,  'Vgr':3, 'snr': 4, 'dist': 5 }
+        outindex={ 'longitude': 0, 'latitude': 1, 'Vph': 2,  'Vgr':3, 'amp': 4, 'snr': 5, 'dist': 6 }
         staLst=self.waveforms.list()
         evnumb=0
         for event in self.events:
             evnumb+=1
             evid='E%05d' % evnumb
-            for staid in staLst:
-                netcode, stacode=staid.split('.')
-                
-        
-        
-        
-        for staid1 in staLst:
             field_lst=[]
             Nfplst=[]
             for per in pers:
                 field_lst.append(np.array([]))
                 Nfplst.append(0)
-            lat1, elv1, lon1=self.waveforms[staid1].coordinates.values()
-            if verbose:
-                print 'Getting field data for: '+staid1
-            for staid2 in staLst:
-                if staid1==staid2:
-                    continue
-                netcode1, stacode1=staid1.split('.')
-                netcode2, stacode2=staid2.split('.')
+            evlo=event.origins[0].longitude; evla=event.origins[0].latitude
+            if verbose: print 'Getting field data for: '+evid
+            for staid in staLst:
+                netcode, stacode=staid.split('.')
                 try:
-                    subdset=self.auxiliary_data[data_type][netcode1][stacode1][netcode2][stacode2][channel]
-                except:
-                    try:
-                        subdset=self.auxiliary_data[data_type][netcode2][stacode2][netcode1][stacode1][channel]
-                    except:
-                        continue
-                lat2, elv2, lon2=self.waveforms[staid2].coordinates.values()
-                dist, az, baz=obspy.geodetics.gps2dist_azimuth(lat1, lon1, lat2, lon2) # distance is in m
-                dist=dist/1000.
-                if lon1<0: lon1+=360.
-                if lon2<0: lon2+=360.
+                    subdset=self.auxiliary_data[data_type][evid][netcode+'_'+stacode+'_'+channel]
+                except KeyError: continue
+                stla, stel, stlo=self.waveforms[staid].coordinates.values()
+                az, baz, dist = geodist.inv(stlo, stla, evlo, evla); dist=dist/1000.
+                if stlo<0: stlo+=360.
+                if evlo<0: evlo+=360.
                 data=subdset.data.value
                 index=subdset.parameters
                 for iper in xrange(pers.size):
@@ -2178,29 +2167,28 @@ class quakeASDF(pyasdf.ASDFDataSet):
                     pvel=data[index['Vph']][ind_per]
                     gvel=data[index['Vgr']][ind_per]
                     snr=data[index['snr']][ind_per]
+                    amp=data[index['amp']][ind_per]
                     inbound=data[index['inbound']][ind_per]
                     # quality control
                     if pvel < 0 or gvel < 0 or pvel>10 or gvel>10 or snr >1e10: continue
                     if inbound!=1.: continue
-                    if snr < 15.: continue
-                    field_lst[iper]=np.append(field_lst[iper], lon2)
-                    field_lst[iper]=np.append(field_lst[iper], lat2)
+                    if snr < 10.: continue # different from noise data
+                    field_lst[iper]=np.append(field_lst[iper], stlo)
+                    field_lst[iper]=np.append(field_lst[iper], stla)
                     field_lst[iper]=np.append(field_lst[iper], pvel)
                     field_lst[iper]=np.append(field_lst[iper], gvel)
+                    field_lst[iper]=np.append(field_lst[iper], amp)
                     field_lst[iper]=np.append(field_lst[iper], snr)
                     field_lst[iper]=np.append(field_lst[iper], dist)
                     Nfplst[iper]+=1
-            # end of reading data from all receivers, taking staid1 as virtual source
             if outdir!=None:
-                if not os.path.isdir(outdir):
-                    os.makedirs(outdir)
-            staid_aux=netcode1+'/'+stacode1+'/'+channel
+                if not os.path.isdir(outdir): os.makedirs(outdir)
+            staid_aux=evid+'_'+channel
             for iper in xrange(pers.size):
                 per=pers[iper]
                 del_per=per-int(per)
-                if field_lst[iper].size==0:
-                    continue
-                field_lst[iper]=field_lst[iper].reshape(Nfplst[iper], 6)
+                if field_lst[iper].size==0: continue
+                field_lst[iper]=field_lst[iper].reshape(Nfplst[iper], 7)
                 if del_per==0.:
                     staid_aux_per=staid_aux+'/'+str(int(per))+'sec'
                 else:
@@ -2210,10 +2198,12 @@ class quakeASDF(pyasdf.ASDFDataSet):
                 if outdir!=None:
                     if not os.path.isdir(outdir+'/'+str(per)+'sec'):
                         os.makedirs(outdir+'/'+str(per)+'sec')
-                    txtfname=outdir+'/'+str(per)+'sec'+'/'+staid1+'_'+str(per)+'.txt'
+                    txtfname=outdir+'/'+str(per)+'sec'+'/'+evid+'_'+str(per)+'.txt'
                     header = 'evlo='+str(lon1)+' evla='+str(lat1)
                     np.savetxt( txtfname, field_lst[iper], fmt='%g', header=header )
         return
+    
+    
 
 
 def aftan4mp_quake(aTr, outdir, inftan, prephdir, f77, pfx):

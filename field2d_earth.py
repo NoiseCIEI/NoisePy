@@ -200,8 +200,8 @@ class Field2d(object):
         except:
             pass
         try:
-            self.lplc=ma.masked_array(self.lplc, mask=np.zeros(reason_n[1:-1, 1:-1].shape) )
-            self.lplc.mask[reason_n[1:-1, 1:-1]!=0]=1
+            self.lplc=ma.masked_array(self.lplc, mask=np.zeros(reason_n.shape) )
+            self.lplc.mask[reason_n!=0]=1
         except:
             print 'No Laplacian array!'
             pass
@@ -343,24 +343,6 @@ class Field2d(object):
         if verbose:
             print 'max lplc:',self.lplc.max(), 'min lplc:',self.lplc.min()
         return
-    
-    
-    def Laplacian_Green(self):
-        """Compute Laplacian of the field using Green's theorem( 2D Gauss's theorem )
-        """
-        try:
-            grad_y=self.grad[0]; grad_x=self.grad[1]
-        except:
-            self.gradient('default'); self.cut_edge(1,1)
-            grad_y=self.grad[0]; grad_x=self.grad[1]
-        grad_xp=grad_x[1:-1, 2:];  grad_xn=grad_x[1:-1, :-2]
-        grad_yp=grad_y[2:, 1:-1];  grad_yn=grad_y[:-2, 1:-1]
-        dlat_km=self.dlat_kmArr[1:-1, 1:-1]; dlon_km=self.dlon_kmArr[1:-1, 1:-1]
-        loopsum=(grad_xp - grad_xn)*dlat_km + (grad_yp - grad_yn)*dlon_km
-        area=dlat_km*dlon_km
-        lplc = loopsum/area
-        self.lplc=lplc
-        return 
     
     def interp_surface(self, workingdir, outfname, tension=0.0):
         """Interpolate input data to grid point with gmt surface command
@@ -591,9 +573,16 @@ class Field2d(object):
         self.reason_n=reason_n
         return
     
+    def get_lplc_amp(self):
+        if self.fieldtype!='Amp': raise ValueError('Not amplitude field!')
+        w=2*np.pi/self.period
+        self.lplc_amp=np.zeros(self.Zarr.shape)
+        self.lplc_amp[self.Zarr!=0]=self.lplc[self.Zarr!=0]/self.Zarr[self.Zarr!=0]/w**2
+        return
     
-    def write_binary(self, outfname):
-        np.savez( outfname, self.appV, self.reason_n, self.proAngle, self.az, self.baz, self.Zarr )
+    def write_binary(self, outfname, amplplc=False):
+        if amplplc: np.savez( outfname, self.appV, self.reason_n, self.proAngle, self.az, self.baz, self.Zarr, self.lplc_amp, self.corV )
+        else: np.savez( outfname, self.appV, self.reason_n, self.proAngle, self.az, self.baz, self.Zarr )
         return
 
     def _get_basemap(self, projection='lambert', geopolygons=None, resolution='i'):
@@ -662,10 +651,10 @@ class Field2d(object):
             cb.set_label('sec', fontsize=12, rotation=0)
         if self.fieldtype=='Amp':
             cb.set_label('nm', fontsize=12, rotation=0)
-        # if contour:
-        #     # levels=np.linspace(ma.getdata(self.Zarr).min(), ma.getdata(self.Zarr).max(), 20)
-        #     levels=np.linspace(ma.getdata(self.Zarr).min(), ma.getdata(self.Zarr).max(), 60)
-        #     m.contour(x, y, self.Zarr, colors='k', levels=levels, linewidths=0.5)
+        if contour:
+            # levels=np.linspace(ma.getdata(self.Zarr).min(), ma.getdata(self.Zarr).max(), 20)
+            levels=np.linspace(ma.getdata(self.Zarr).min(), ma.getdata(self.Zarr).max(), 60)
+            m.contour(x, y, self.Zarr, colors='k', levels=levels, linewidths=0.5)
         if showfig:
             plt.show()
         return
@@ -690,31 +679,24 @@ class Field2d(object):
             plt.show()
         return
     
-    def plot_lplcC(self, infield=None, projection='lambert', contour=False, geopolygons=None, vmin=-0.012, vmax=0.012, period=10., showfig=True):
+    def plot_lplc_amp(self, projection='lambert', contour=False, geopolygons=None, vmin=None, vmax=None, showfig=True):
         """Plot data with contour
         """
         m=self._get_basemap(projection=projection, geopolygons=geopolygons)
+        m.drawstates()
         if self.lonArr.shape[0]-2==self.lplc.shape[0] and self.lonArr.shape[1]-2==self.lplc.shape[1]:
             self.cut_edge(1,1)
         elif self.lonArr.shape[0]!=self.lplc.shape[0] or self.lonArr.shape[1]!=self.lplc.shape[1]:
             raise ValueError('Incompatible shape for lplc and lon/lat array!')
-        w=2*np.pi/period
-        Zarr=self.Zarr.copy()
-        Zarr[self.Zarr==0]=-1
-        lplcC=self.lplc/Zarr/w**2
-        if infield!=None:
-            lplcC=lplcC*(infield.appV[1:-1,1:-1])**3/2.
-            vmin=-0.2
-            vmax=0.2
 
-        lplcC=ma.masked_array(lplcC, mask=np.zeros(self.Zarr.shape) )
-        lplcC.mask[self.reason_n!=0]=1
+        lplc_amp=ma.masked_array(self.lplc_amp, mask=np.zeros(self.Zarr.shape) )
+        lplc_amp.mask[self.reason_n!=0]=1
         x, y=m(self.lonArr, self.latArr)
-        cmap =discrete_cmap(int((vmax-vmin)*80)/2+1, 'seismic')
-        im=m.pcolormesh(x, y, lplcC, cmap=cmap, shading='gouraud', vmin=vmin, vmax=vmax)
+        # cmap =discrete_cmap(int((vmax-vmin)*80)/2+1, 'seismic')
+        im=m.pcolormesh(x, y, lplc_amp, cmap='seismic_r', shading='gouraud', vmin=vmin, vmax=vmax)
         cb = m.colorbar(im, "right", size="3%", pad='2%')
-        cb.ax.tick_params(labelsize=5)
-        cb.set_label(r"$\frac{\mathrm{km}}{\mathrm{s}}$", fontsize=8, rotation=0)
+        cb.ax.tick_params(labelsize=15)
+        # cb.set_label(r"$\frac{\mathrm{km}}{\mathrm{s}}$", fontsize=8, rotation=0)
         if showfig:
             plt.show()
         return

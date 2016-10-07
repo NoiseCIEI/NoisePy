@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-A python module to run surface wave Eikonal tomography
+A python module to run surface wave Eikonal/Helmholtz tomography
 The code creates a datadbase based on hdf5 data format
 
 :Dependencies:
@@ -35,7 +35,6 @@ import numexpr
 import warnings
 from functools import partial
 import multiprocessing
-
 
 
 class EikonalTomoDataSet(h5py.File):
@@ -92,7 +91,7 @@ class EikonalTomoDataSet(h5py.File):
             except:
                 runid+=1
                 continue
-        group.attrs.create(name = 'fieldtype', data=fieldtype[1:])
+        group.attrs.create(name = fieldtype, data=fieldtype[1:])
         inDbase=pyasdf.ASDFDataSet(inasdffname)
         pers = self.attrs['period_array']
         minlon=self.attrs['minlon']
@@ -177,7 +176,7 @@ class EikonalTomoDataSet(h5py.File):
             except:
                 runid+=1
                 continue
-        group.attrs.create(name = 'fieldtype', data=fieldtype[1:])
+        group.attrs.create(name = fieldtype, data=fieldtype[1:])
         inDbase=pyasdf.ASDFDataSet(inasdffname)
         pers = self.attrs['period_array']
         minlon=self.attrs['minlon']
@@ -265,8 +264,270 @@ class EikonalTomoDataSet(h5py.File):
         if deletetxt: shutil.rmtree(workingdir)
         return
     
+    def quake_eikonal(self, inasdffname, workingdir, fieldtype='Tph', channel='Z', data_type='FieldDISPpmf2interp',
+            runid=0, merge=False, deletetxt=False, verbose=True, amplplc=False):
+        """
+        Compute gradient of travel time for earthquake data
+        =================================================================================================================
+        Input Parameters:
+        inasdffname - input ASDF data file
+        workingdir  - working directory
+        fieldtype   - fieldtype (Tph or Tgr)
+        channel     - channel for analysis
+        data_type   - data type
+                     (default='FieldDISPpmf2interp', aftan measurements with phase-matched filtering and jump correction)
+        runid       - run id
+        deletetxt   - delete output txt files in working directory
+        amplplc     - compute amplitude Laplacian term or not
+        =================================================================================================================
+        """
+        if fieldtype!='Tph' and fieldtype!='Tgr':
+            raise ValueError('Wrong field type: '+fieldtype+' !')
+        if merge:
+            try:
+                group=self.create_group( name = 'Eikonal_run_'+str(runid) )
+                group.attrs.create(name = fieldtype, data=fieldtype[1:])
+            except ValueError:
+                print 'Merging Eikonal run id: ',runid
+                pass
+        else:
+            create_group=False
+            while (not create_group):
+                try:
+                    group=self.create_group( name = 'Eikonal_run_'+str(runid) )
+                    create_group=True
+                except:
+                    runid+=1
+                    continue
+            group.attrs.create(name = fieldtype, data=fieldtype[1:])
+        inDbase=pyasdf.ASDFDataSet(inasdffname)
+        pers = self.attrs['period_array']
+        minlon=self.attrs['minlon']
+        maxlon=self.attrs['maxlon']
+        minlat=self.attrs['minlat']
+        maxlat=self.attrs['maxlat']
+        dlon=self.attrs['dlon']
+        dlat=self.attrs['dlat']
+        fdict={ 'Tph': 2, 'Tgr': 3, 'Amp': 4}
+        evLst=inDbase.events
+        for per in pers:
+            print 'Computing gradient for: '+str(per)+' sec'
+            del_per=per-int(per)
+            if del_per==0.:
+                persfx=str(int(per))+'sec'
+            else:
+                dper=str(del_per)
+                persfx=str(int(per))+'sec'+dper.split('.')[1]
+            working_per=workingdir+'/'+str(per)+'sec'
+            per_group=group.require_group( name='%g_sec'%( per ) )
+            evnumb=0
+            for event in evLst:
+                evnumb+=1
+                evid='E%05d' % evnumb
+                try:
+                    subdset = inDbase.auxiliary_data[data_type][evid+'_'+channel][persfx]
+                except KeyError:
+                    print 'No travel time field for: '+evid
+                    continue
+                magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
+                event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
+                evlo=event.origins[0].longitude; evla=event.origins[0].latitude
+                if verbose: print 'Event: '+event_descrip+', '+Mtype+' = '+str(magnitude) 
+                if evlo<0.: evlo+=360.
+                dataArr = subdset.data.value
+                field2d=field2d_earth.Field2d(minlon=minlon, maxlon=maxlon, dlon=dlon,
+                        minlat=minlat, maxlat=maxlat, dlat=dlat, period=per, evlo=evlo, evla=evla, fieldtype=fieldtype)
+                Zarr=dataArr[:, fdict[fieldtype]]
+                distArr=dataArr[:, 6] # Note amplitude in added!!!
+                field2d.read_array(lonArr=np.append(evlo, dataArr[:,0]), latArr=np.append(evla, dataArr[:,1]), ZarrIn=np.append(0., distArr/Zarr) )
+                outfname=evid+'_'+fieldtype+'_'+channel+'.lst'
+                field2d.interp_surface(workingdir=working_per, outfname=outfname)
+                field2d.check_curvature(workingdir=working_per, outpfx=evid+'_'+channel+'_')
+                field2d.gradient_qc(workingdir=working_per, inpfx=evid+'_'+channel+'_', nearneighbor=True, cdist=None)
+                # save data to hdf5 dataset
+                event_group=per_group.create_group(name=evid)
+                event_group.attrs.create(name = 'evlo', data=evlo)
+                event_group.attrs.create(name = 'evla', data=evla)
+                appVdset     = event_group.create_dataset(name='appV', data=field2d.appV)
+                reason_ndset = event_group.create_dataset(name='reason_n', data=field2d.reason_n)
+                proAngledset = event_group.create_dataset(name='proAngle', data=field2d.proAngle)
+                azdset       = event_group.create_dataset(name='az', data=field2d.az)
+                bazdset      = event_group.create_dataset(name='baz', data=field2d.baz)
+                Tdset        = event_group.create_dataset(name='travelT', data=field2d.Zarr)
+                if amplplc:
+                    field2dAmp=field2d_earth.Field2d(minlon=minlon, maxlon=maxlon, dlon=dlon,
+                        minlat=minlat, maxlat=maxlat, dlat=dlat, period=per, evlo=evlo, evla=evla, fieldtype='Amp')
+                    field2dAmp.read_array(lonArr=dataArr[:,0], latArr=dataArr[:,1], ZarrIn=dataArr[:, fdict['Amp']] )
+                    outfnameAmp=evid+'_Amp_'+channel+'.lst'
+                    field2dAmp.interp_surface(workingdir=working_per, outfname=outfnameAmp)
+                    field2dAmp.gradient()
+                    field2dAmp.cut_edge(1,1)
+                    field2dAmp.Laplacian()
+                    field2dAmp.cut_edge(1,1)
+                    field2dAmp.get_lplc_amp()
+                    lplc_ampdset = event_group.create_dataset(name='lplc_amp', data=field2dAmp.lplc_amp)
+                    field2dAmp.lplc_amp[field2dAmp.lplc_amp > 2e-2]=0
+                    field2dAmp.lplc_amp[field2dAmp.lplc_amp < -2e-2]=0
+                    slownessApp=-np.ones(field2d.appV.shape)
+                    slownessApp[field2d.appV!=0]=1./field2d.appV[field2d.appV!=0]
+                    temp=slownessApp**2-field2dAmp.lplc_amp
+                    temp[temp<0]=0
+                    slownessCor=np.sqrt(temp)
+                    corV=np.zeros(slownessCor.shape)
+                    corV[slownessCor!=0]=1./slownessCor[slownessCor!=0]
+                    corV_ampdset = event_group.create_dataset(name='corV', data=corV)
+                # field2d.appV=corV
+                return field2d
+        if deletetxt: shutil.rmtree(workingdir)
+        return
     
-    def eikonal_stack(self, runid=0, minazi=-180, maxazi=180, N_bin=20, anisotropic=False):
+    def quake_eikonal_mp(self, inasdffname, workingdir, fieldtype='Tph', channel='Z', data_type='FieldDISPpmf2interp', runid=0,
+                merge=False, deletetxt=True, verbose=True, subsize=1000, nprocess=None, amplplc=False):
+        """
+        Compute gradient of travel time for cross-correlation data with multiprocessing
+        =================================================================================================================
+        Input Parameters:
+        inasdffname - input ASDF data file
+        workingdir  - working directory
+        fieldtype   - fieldtype (Tph or Tgr)
+        channel     - channel for analysis
+        data_type   - data type
+                     (default='FieldDISPpmf2interp', aftan measurements with phase-matched filtering and jump correction)
+        runid       - run id
+        deletetxt   - delete output txt files in working directory
+        subsize     - subsize of processing list, use to prevent lock in multiprocessing process
+        nprocess    - number of processes
+        amplplc     - compute amplitude Laplacian term or not
+        =================================================================================================================
+        """
+        if fieldtype!='Tph' and fieldtype!='Tgr':
+            raise ValueError('Wrong field type: '+fieldtype+' !')
+        if merge:
+            try:
+                group=self.create_group( name = 'Eikonal_run_'+str(runid) )
+                group.attrs.create(name = fieldtype, data=fieldtype[1:])
+            except ValueError:
+                print 'Merging Eikonal run id: ',runid
+                pass
+        else:
+            create_group=False
+            while (not create_group):
+                try:
+                    group=self.create_group( name = 'Eikonal_run_'+str(runid) )
+                    create_group=True
+                except:
+                    runid+=1
+                    continue
+            group.attrs.create(name = fieldtype, data=fieldtype[1:])
+        inDbase=pyasdf.ASDFDataSet(inasdffname)
+        pers = self.attrs['period_array']
+        minlon=self.attrs['minlon']
+        maxlon=self.attrs['maxlon']
+        minlat=self.attrs['minlat']
+        maxlat=self.attrs['maxlat']
+        dlon=self.attrs['dlon']
+        dlat=self.attrs['dlat']
+        fdict={ 'Tph': 2, 'Tgr': 3, 'Amp': 4}
+        evLst=inDbase.events
+        fieldLst=[]
+        # prepare data
+        for per in pers:
+            print 'Computing gradient for: '+str(per)+' sec'
+            del_per=per-int(per)
+            if del_per==0.:
+                persfx=str(int(per))+'sec'
+            else:
+                dper=str(del_per)
+                persfx=str(int(per))+'sec'+dper.split('.')[1]
+            working_per=workingdir+'/'+str(per)+'sec'
+            per_group=group.require_group( name='%g_sec'%( per ) )
+            evnumb=0
+            for event in evLst:
+                evnumb+=1
+                evid='E%05d' % evnumb
+                try:
+                    subdset = inDbase.auxiliary_data[data_type][evid+'_'+channel][persfx]
+                except KeyError:
+                    print 'No travel time field for: '+evid
+                    continue
+                magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
+                event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
+                evlo=event.origins[0].longitude; evla=event.origins[0].latitude
+                if verbose: print 'Event: '+event_descrip+', '+Mtype+' = '+str(magnitude) 
+                if evlo<0.: evlo+=360.
+                dataArr = subdset.data.value
+                fieldpair=[]
+                field2d=field2d_earth.Field2d(minlon=minlon, maxlon=maxlon, dlon=dlon,
+                        minlat=minlat, maxlat=maxlat, dlat=dlat, period=per, evlo=evlo, evla=evla, fieldtype=fieldtype, evid=evid)
+                Zarr=dataArr[:, fdict[fieldtype]]
+                distArr=dataArr[:, 6] # Note amplitude in added!!!
+                field2d.read_array(lonArr=np.append(evlo, dataArr[:,0]), latArr=np.append(evla, dataArr[:,1]), ZarrIn=np.append(0., distArr/Zarr) )
+                fieldpair.append(field2d)
+                if amplplc:
+                    field2dAmp=field2d_earth.Field2d(minlon=minlon, maxlon=maxlon, dlon=dlon,
+                        minlat=minlat, maxlat=maxlat, dlat=dlat, period=per, evlo=evlo, evla=evla, fieldtype='Amp', evid=evid)
+                    field2dAmp.read_array(lonArr=dataArr[:,0], latArr=dataArr[:,1], ZarrIn=dataArr[:, fdict['Amp']] )
+                    fieldpair.append(field2dAmp)
+                fieldLst.append(fieldpair)
+        # Computing gradient with multiprocessing
+        if len(fieldLst) > subsize:
+            Nsub = int(len(fieldLst)/subsize)
+            for isub in xrange(Nsub):
+                print 'Subset:', isub,'in',Nsub,'sets'
+                cfieldLst=fieldLst[isub*subsize:(isub+1)*subsize]
+                HELMHOTZ = partial(helmhotz4mp, workingdir=workingdir, channel=channel, amplplc=amplplc)
+                pool = multiprocessing.Pool(processes=nprocess)
+                pool.map(HELMHOTZ, cfieldLst) #make our results with a map call
+                pool.close() #we are not adding any more processes
+                pool.join() #tell it to wait until all threads are done before going on
+            cfieldLst=fieldLst[(isub+1)*subsize:]
+            HELMHOTZ = partial(helmhotz4mp, workingdir=workingdir, channel=channel, amplplc=amplplc)
+            pool = multiprocessing.Pool(processes=nprocess)
+            pool.map(HELMHOTZ, cfieldLst) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        else:
+            HELMHOTZ = partial(helmhotz4mp, workingdir=workingdir, channel=channel, amplplc=amplplc)
+            pool = multiprocessing.Pool(processes=nprocess)
+            pool.map(HELMHOTZ, fieldLst) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        # Read data into hdf5 dataset
+        for per in pers:
+            print 'Reading gradient data for: '+str(per)+' sec'
+            working_per=workingdir+'/'+str(per)+'sec'
+            per_group=group.require_group( name='%g_sec'%( per ) )
+            evnumb=0
+            for event in evLst:
+                evnumb+=1
+                evid='E%05d' % evnumb
+                infname=working_per+'/'+evid+'_field2d.npz'
+                if not os.path.isfile(infname): print 'No data for:', evid; continue
+                InArr=np.load(infname)
+                appV=InArr['arr_0']; reason_n=InArr['arr_1']; proAngle=InArr['arr_2']
+                az=InArr['arr_3']; baz=InArr['arr_4']; Zarr=InArr['arr_5']
+                if amplplc:
+                    lplc_amp=InArr['arr_6']; corV=InArr['arr_7']
+                evlo=event.origins[0].longitude; evla=event.origins[0].latitude
+                # save data to hdf5 dataset
+                event_group=per_group.require_group(name=evid)
+                event_group.attrs.create(name = 'evlo', data=evlo)
+                event_group.attrs.create(name = 'evla', data=evla)
+                appVdset     = event_group.create_dataset(name='appV', data=appV)
+                reason_ndset = event_group.create_dataset(name='reason_n', data=reason_n)
+                proAngledset = event_group.create_dataset(name='proAngle', data=proAngle)
+                azdset       = event_group.create_dataset(name='az', data=az)
+                bazdset      = event_group.create_dataset(name='baz', data=baz)
+                Tdset        = event_group.create_dataset(name='travelT', data=Zarr)
+                if amplplc:
+                    lplc_ampdset = event_group.create_dataset(name='lplc_amp', data=lplc_amp)
+                    corV_dset = event_group.create_dataset(name='corV', data=corV)
+        if deletetxt: shutil.rmtree(workingdir)
+        return
+    
+    
+    
+    def eikonal_stack(self, runid=0, minazi=-180, maxazi=180, N_bin=20, anisotropic=False, helmholtz=False):
         """
         Stack gradient results to perform Eikonal Tomography
         =================================================================================================================
@@ -312,13 +573,14 @@ class EikonalTomoDataSet(h5py.File):
                 evid=per_group.keys()[iev]
                 event_group=per_group[evid]
                 reason_n=event_group['reason_n'].value
-                appV=event_group['appV'].value
                 az=event_group['az'].value
                 oneArr=np.ones((Nlat-4, Nlon-4))
                 oneArr[reason_n!=0]=0
                 Nmeasure+=oneArr
+                if helmholtz: velocity=event_group['corV'].value
+                else: velocity=event_group['appV'].value
                 slowness=np.zeros((Nlat-4, Nlon-4))
-                slowness[appV!=0]=1./appV[appV!=0]
+                slowness[velocity!=0]=1./velocity[velocity!=0]
                 slownessArr[iev, :, :]=slowness
                 reason_nArr[iev, :, :]=reason_n
                 aziArr[iev, :, :]=az
@@ -638,5 +900,35 @@ def eikonal4mp(infield, workingdir, channel):
     infield.gradient_qc(workingdir=working_per, inpfx=infield.evid+'_'+channel+'_', nearneighbor=True, cdist=None)
     outfname_npz=working_per+'/'+infield.evid+'_field2d'
     infield.write_binary(outfname=outfname_npz)
+    return
+
+def helmhotz4mp(infieldpair, workingdir, channel, amplplc):
+    tfield=infieldpair[0]
+    working_per=workingdir+'/'+str(tfield.period)+'sec'
+    outfname=tfield.evid+'_'+tfield.fieldtype+'_'+channel+'.lst'
+    tfield.interp_surface(workingdir=working_per, outfname=outfname)
+    tfield.check_curvature(workingdir=working_per, outpfx=tfield.evid+'_'+channel+'_')
+    tfield.gradient_qc(workingdir=working_per, inpfx=tfield.evid+'_'+channel+'_', nearneighbor=True, cdist=None)
+    outfname_npz=working_per+'/'+tfield.evid+'_field2d'
+    if not amplplc: tfield.write_binary(outfname=outfname_npz)
+    if amplplc:
+        field2dAmp=infieldpair[1]
+        outfnameAmp=field2dAmp.evid+'_Amp_'+channel+'.lst'
+        field2dAmp.interp_surface(workingdir=working_per, outfname=outfnameAmp)
+        field2dAmp.gradient()
+        field2dAmp.cut_edge(1,1)
+        field2dAmp.Laplacian()
+        field2dAmp.cut_edge(1,1)
+        field2dAmp.get_lplc_amp()
+        slownessApp=-np.ones(tfield.appV.shape)
+        slownessApp[tfield.appV!=0]=1./tfield.appV[tfield.appV!=0]
+        temp=slownessApp**2-field2dAmp.lplc_amp
+        temp[temp<0]=0
+        slownessCor=np.sqrt(temp)
+        corV=np.zeros(slownessCor.shape)
+        corV[slownessCor!=0]=1./slownessCor[slownessCor!=0]
+        tfield.corV=corV
+        tfield.lplc_amp=field2dAmp.lplc_amp
+        tfield.write_binary(outfname=outfname_npz, amplplc=amplplc)
     return 
 

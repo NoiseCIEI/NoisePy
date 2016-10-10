@@ -1527,6 +1527,23 @@ def aftan4mp(aTr, outdir, inftan, prephdir, f77, pfx):
     return
     
     
+    
+class requestInfo(object):
+    def __init__(self, evnumb, network, station, location, channel, starttime, endtime, quality=None,
+            minimumlength=None, longestonly=None, filename=None, attach_response=False):
+        self.evnumb         = evnumb
+        self.network        = network
+        self.station        = station
+        self.location       = location
+        self.channel        = channel
+        self.starttime      = starttime
+        self.endtime        = endtime
+        self.quality        = quality
+        self.minimumlength  = minimumlength
+        self.longestonly    = longestonly
+        self.filename       = filename
+        self.attach_response= attach_response
+
 class quakeASDF(pyasdf.ASDFDataSet):
     """ An object to for earthquake data analysis based on ASDF database
     """    
@@ -1665,7 +1682,7 @@ class quakeASDF(pyasdf.ASDFDataSet):
                             starttime=starttime, endtime=endtime, attach_response=True)
                 except:
                     if verbose: print 'No data for:', staid
-                    pass
+                    continue
                 if verbose: print 'Getting data for:', staid
             print '===================================== Removing response ======================================='
             pre_filt = (0.001, 0.005, 1, 100.0)
@@ -1673,6 +1690,96 @@ class quakeASDF(pyasdf.ASDFDataSet):
             st.remove_response(pre_filt=pre_filt, taper_fraction=0.1)
             tag='surf_ev_%05d' %evnumb
             self.add_waveforms(st, tag=tag)
+        return
+    
+    
+    def get_surf_waveforms_mp(self, outdir, lon0=None, lat0=None, minDelta=-1, maxDelta=181, channel='LHZ', vmax=6.0, vmin=1.0, verbose=False,
+            subsize=1000, deletemseed=False, nprocess=None):
+        """Get surface wave data from IRIS server with multiprocessing
+        ====================================================================================================================
+        Input Parameters:
+        lon0, lat0      - center of array. If specified, all wave form will have the same starttime and endtime
+        min/maxDelta    - minimum/maximum epicentral distance, in degree
+        channel         - Channel code, e.g. 'BHZ'.
+                            Last character (i.e. component) can be a wildcard (‘?’ or ‘*’) to fetch Z, N and E component.
+        vmin, vmax      - minimum/maximum velocity for surface wave window
+        =====================================================================================================================
+        """
+        client=Client('IRIS')
+        evnumb=0
+        L=len(self.events)
+        if not os.path.isdir(outdir): os.makedirs(outdir)
+        reqwaveLst=[]
+        print '================================= Preparing for surface wave data download ==================================='
+        for event in self.events:
+            eventid=event.resource_id.id.split('=')[-1]
+            magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
+            event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
+            evnumb+=1
+            otime=event.origins[0].time
+            evlo=event.origins[0].longitude; evla=event.origins[0].latitude
+            if lon0!=None and lat0!=None:
+                dist, az, baz=obspy.geodetics.gps2dist_azimuth(evla, evlo, lat0, lon0) # distance is in m
+                dist=dist/1000.
+                starttime=otime+dist/vmax; endtime=otime+dist/vmin
+                commontime=True
+            else:
+                commontime=False
+            for staid in self.waveforms.list():
+                netcode, stacode=staid.split('.')
+                # if stacode!='A14A': continue
+                stla, elev, stlo=self.waveforms[staid].coordinates.values()
+                if not commontime:
+                    dist, az, baz=obspy.geodetics.gps2dist_azimuth(evla, evlo, stla, stlo) # distance is in m
+                    dist=dist/1000.; Delta=obspy.geodetics.kilometer2degrees(dist)
+                    if Delta<minDelta: continue
+                    if Delta>maxDelta: continue
+                    starttime=otime+dist/vmax; endtime=otime+dist/vmin
+                reqwaveLst.append( requestInfo(evnumb=evnumb, network=netcode, station=stacode, location='', channel=channel,
+                            starttime=starttime, endtime=endtime, attach_response=True) )
+        print '============================= Start multiprocessing download surface wave data ==============================='
+        if len(reqwaveLst) > subsize:
+            Nsub = int(len(reqwaveLst)/subsize)
+            for isub in xrange(Nsub):
+                print 'Subset:', isub,'in',Nsub,'sets'
+                creqlst=reqwaveLst[isub*subsize:(isub+1)*subsize]
+                GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, verbose=verbose)
+                pool = multiprocessing.Pool(processes=nprocess)
+                pool.map(GETDATA, creqlst) #make our results with a map call
+                pool.close() #we are not adding any more processes
+                pool.join() #tell it to wait until all threads are done before going on
+            creqlst=reqwaveLst[(isub+1)*subsize:]
+            GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, verbose=verbose)
+            pool = multiprocessing.Pool(processes=nprocess)
+            pool.map(GETDATA, creqlst) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        else:
+            GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, verbose=verbose)
+            pool = multiprocessing.Pool(processes=nprocess)
+            pool.map(GETDATA, reqwaveLst) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        print '============================= End of multiprocessing download surface wave data =============================='
+        print '==================================== Reading downloaded surface wave data ===================================='
+        evnumb=0
+        no_resp=0
+        for event in self.events:
+            magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
+            event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
+            evnumb+=1
+            evid='E%05d' %evnumb
+            tag='surf_ev_%05d' %evnumb
+            print 'Event ' + str(evnumb)+' : '+event_descrip+', '+Mtype+' = '+str(magnitude) 
+            for staid in self.waveforms.list():
+                netcode, stacode=staid.split('.')
+                infname=outdir+'/'+evid+'.'+staid+'.mseed'
+                if os.path.isfile(infname):
+                    self.add_waveforms(infname, tag=tag)
+                    if deletemseed: os.remove(infname)
+                elif os.path.isfile(outdir+'/'+evid+'.'+staid+'.no_resp.mseed'): no_resp+=1
+        print '================================== End reading downloaded surface wave data =================================='
+        print 'Number of file without resp:', no_resp
         return
             
     def array_processing(self, evnumb=1, win_len=20., win_frac=0.2, sll_x=-3.0, slm_x=3.0, sll_y=-3.0, slm_y=3.0, sl_s=0.03,
@@ -2223,4 +2330,35 @@ def aftan4mp_quake(aTr, outdir, inftan, prephdir, f77, pfx):
     aTr.get_snr(ffact=inftan.ffact) # SNR analysis
     foutPR=outdir+'/'+pfx+'/'+aTr.stats.sac.kuser0+'/'+aTr.stats.network+'.'+aTr.stats.station+'_'+aTr.stats.channel[-1]+'.SAC'
     aTr.ftanparam.writeDISPbinary(foutPR)
+    return
+
+
+def get_waveforms4mp(reqinfo, outdir, client, verbose=True):
+    
+    try:
+        st = client.get_waveforms(network=reqinfo.network, station=reqinfo.station, location=reqinfo.location, channel=reqinfo.channel,
+                starttime=reqinfo.starttime, endtime=reqinfo.endtime, attach_response=reqinfo.attach_response)
+    except:
+        if verbose: print 'No data for:', reqinfo.network+'.'+reqinfo.station
+        return
+    if verbose: print 'Getting data for:', reqinfo.network+'.'+reqinfo.station
+    # print '===================================== Removing response ======================================='
+    evid='E%05d' %reqinfo.evnumb
+    pre_filt = (0.001, 0.005, 1, 100.0)
+    st.detrend()
+    try:
+        st.remove_response(pre_filt=pre_filt, taper_fraction=0.1)
+    except ValueError:
+        N=10; i=0; get_resp=False
+        while (i < N) and (not get_resp):
+            st = client.get_waveforms(network=reqinfo.network, station=reqinfo.station, location=reqinfo.location, channel=reqinfo.channel,
+                    starttime=reqinfo.starttime, endtime=reqinfo.endtime, attach_response=reqinfo.attach_response)
+            try:
+                st.remove_response(pre_filt=pre_filt, taper_fraction=0.1)
+                get_resp=True
+            except ValueError: i+=1
+        if not get_resp:
+            st.write(outdir+'/'+evid+'.'+reqinfo.network+'.'+reqinfo.station+'.no_resp.mseed', format='mseed')
+            return
+    st.write(outdir+'/'+evid+'.'+reqinfo.network+'.'+reqinfo.station+'.mseed', format='mseed')
     return

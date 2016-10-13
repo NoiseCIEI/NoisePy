@@ -43,6 +43,10 @@ from mpl_toolkits.basemap import Basemap, shiftgrid, cm
 import obspy.signal.array_analysis
 from obspy.imaging.cm import obspy_sequential
 from pyproj import Geod
+from obspy.taup import TauPyModel
+import CURefPy
+import glob
+
 # from obspy.signal.invsim import corn_freq_2_paz
 sta_info_default={'rec_func': 0, 'xcorr': 1, 'isnet': 0}
 
@@ -53,10 +57,14 @@ xcorr_sacheader_default = {'knetwk': '', 'kstnm': '', 'kcmpnm': '', 'stla': 1234
             'kuser0': '', 'kevnm': '', 'evla': 12345, 'evlo': 12345, 'evdp': 0., 'dist': 0., 'az': 12345, 'baz': 12345, 
                 'delta': 12345, 'npts': 12345, 'user0': 0, 'b': 12345, 'e': 12345}
 
+ref_header_default = {'otime': '', 'network': '', 'station': '', 'stla': 12345, 'stlo': 12345, 'evla': 12345, 'evlo': 12345, 'evdp': 0.,
+                    'dist': 0., 'az': 12345, 'baz': 12345, 'delta': 12345, 'npts': 12345, 'b': 12345, 'e': 12345, 'arrival': 12345, 'phase': '',
+                        'tbeg': 12345, 'tend': 12345, 'hslowness': 12345, 'ghw': 12345, 'VR':  12345, 'moveout': -1}
+
 monthdict={1: 'JAN', 2: 'FEB', 3: 'MAR', 4: 'APR', 5: 'MAY', 6: 'JUN', 7: 'JUL', 8: 'AUG', 9: 'SEP', 10: 'OCT', 11: 'NOV', 12: 'DEC'}
 
 geodist = Geod(ellps='WGS84')
-
+taupmodel = TauPyModel(model="iasp91")
 
 class noiseASDF(pyasdf.ASDFDataSet):
     """ An object to for ambient noise cross-correlation analysis based on ASDF database
@@ -1530,7 +1538,7 @@ def aftan4mp(aTr, outdir, inftan, prephdir, f77, pfx):
     
 class requestInfo(object):
     def __init__(self, evnumb, network, station, location, channel, starttime, endtime, quality=None,
-            minimumlength=None, longestonly=None, filename=None, attach_response=False):
+            minimumlength=None, longestonly=None, filename=None, attach_response=False, baz=0):
         self.evnumb         = evnumb
         self.network        = network
         self.station        = station
@@ -1543,6 +1551,7 @@ class requestInfo(object):
         self.longestonly    = longestonly
         self.filename       = filename
         self.attach_response= attach_response
+        self.baz            = baz
 
 class quakeASDF(pyasdf.ASDFDataSet):
     """ An object to for earthquake data analysis based on ASDF database
@@ -1632,7 +1641,7 @@ class quakeASDF(pyasdf.ASDFDataSet):
         client=Client('IRIS')
         inv = client.get_stations(network=network, station=station, starttime=starttime, endtime=endtime, channel=channel, 
             minlatitude=minlatitude, maxlatitude=maxlatitude, minlongitude=minlongitude, maxlongitude=maxlongitude,
-            latitude=latitude, longitude=longitude, minradius=minradius, maxradius=maxradius)
+            latitude=latitude, longitude=longitude, minradius=minradius, maxradius=maxradius, level='channel')
         self.add_stationxml(inv)
         self.inv=inv
         return 
@@ -1652,7 +1661,7 @@ class quakeASDF(pyasdf.ASDFDataSet):
         evnumb=0
         L=len(self.events)
         for event in self.events:
-            eventid=event.resource_id.id.split('=')[-1]
+            event_id=event.resource_id.id.split('=')[-1]
             magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
             event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
             evnumb+=1
@@ -1677,8 +1686,9 @@ class quakeASDF(pyasdf.ASDFDataSet):
                     if Delta<minDelta: continue
                     if Delta>maxDelta: continue
                     starttime=otime+dist/vmax; endtime=otime+dist/vmin
+                location=self.waveforms[staid].StationXML[0].stations[0].channels[0].location_code
                 try:
-                    st += client.get_waveforms(network=netcode, station=stacode, location='', channel=channel,
+                    st += client.get_waveforms(network=netcode, station=stacode, location=location, channel=channel,
                             starttime=starttime, endtime=endtime, attach_response=True)
                 except:
                     if verbose: print 'No data for:', staid
@@ -1689,12 +1699,11 @@ class quakeASDF(pyasdf.ASDFDataSet):
             st.detrend()
             st.remove_response(pre_filt=pre_filt, taper_fraction=0.1)
             tag='surf_ev_%05d' %evnumb
-            self.add_waveforms(st, tag=tag)
+            self.add_waveforms(st, event_id=event_id, tag=tag)
         return
     
-    
     def get_surf_waveforms_mp(self, outdir, lon0=None, lat0=None, minDelta=-1, maxDelta=181, channel='LHZ', vmax=6.0, vmin=1.0, verbose=False,
-            subsize=1000, deletemseed=False, nprocess=None):
+            subsize=1000, deletemseed=False, nprocess=None, snumb=0, enumb=None):
         """Get surface wave data from IRIS server with multiprocessing
         ====================================================================================================================
         Input Parameters:
@@ -1703,6 +1712,10 @@ class quakeASDF(pyasdf.ASDFDataSet):
         channel         - Channel code, e.g. 'BHZ'.
                             Last character (i.e. component) can be a wildcard (‘?’ or ‘*’) to fetch Z, N and E component.
         vmin, vmax      - minimum/maximum velocity for surface wave window
+        subsize         - subsize of processing list, use to prevent lock in multiprocessing process
+        deletemseed     - delete output MiniSeed files
+        nprocess        - number of processes
+        snumb, enumb    - start/end number of processing block
         =====================================================================================================================
         """
         client=Client('IRIS')
@@ -1735,27 +1748,31 @@ class quakeASDF(pyasdf.ASDFDataSet):
                     if Delta<minDelta: continue
                     if Delta>maxDelta: continue
                     starttime=otime+dist/vmax; endtime=otime+dist/vmin
-                reqwaveLst.append( requestInfo(evnumb=evnumb, network=netcode, station=stacode, location='', channel=channel,
+                location=self.waveforms[staid].StationXML[0].stations[0].channels[0].location_code
+                reqwaveLst.append( requestInfo(evnumb=evnumb, network=netcode, station=stacode, location=location, channel=channel,
                             starttime=starttime, endtime=endtime, attach_response=True) )
         print '============================= Start multiprocessing download surface wave data ==============================='
         if len(reqwaveLst) > subsize:
             Nsub = int(len(reqwaveLst)/subsize)
+            if enumb==None: enumb=Nsub
             for isub in xrange(Nsub):
-                print 'Subset:', isub,'in',Nsub,'sets'
+                if isub < snumb: continue
+                if isub > enumb: continue
+                print 'Subset:', isub+1,'in',Nsub,'sets'
                 creqlst=reqwaveLst[isub*subsize:(isub+1)*subsize]
-                GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, verbose=verbose)
+                GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, pre_filt = (0.001, 0.005, 1, 100.0), verbose=verbose, rotation=False)
                 pool = multiprocessing.Pool(processes=nprocess)
                 pool.map(GETDATA, creqlst) #make our results with a map call
                 pool.close() #we are not adding any more processes
                 pool.join() #tell it to wait until all threads are done before going on
             creqlst=reqwaveLst[(isub+1)*subsize:]
-            GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, verbose=verbose)
+            GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, pre_filt = (0.001, 0.005, 1, 100.0), verbose=verbose, rotation=False)
             pool = multiprocessing.Pool(processes=nprocess)
             pool.map(GETDATA, creqlst) #make our results with a map call
             pool.close() #we are not adding any more processes
             pool.join() #tell it to wait until all threads are done before going on
         else:
-            GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, verbose=verbose)
+            GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, pre_filt = (0.001, 0.005, 1, 100.0), verbose=verbose, rotation=False)
             pool = multiprocessing.Pool(processes=nprocess)
             pool.map(GETDATA, reqwaveLst) #make our results with a map call
             pool.close() #we are not adding any more processes
@@ -1765,6 +1782,7 @@ class quakeASDF(pyasdf.ASDFDataSet):
         evnumb=0
         no_resp=0
         for event in self.events:
+            event_id=event.resource_id.id.split('=')[-1]
             magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
             event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
             evnumb+=1
@@ -1775,13 +1793,521 @@ class quakeASDF(pyasdf.ASDFDataSet):
                 netcode, stacode=staid.split('.')
                 infname=outdir+'/'+evid+'.'+staid+'.mseed'
                 if os.path.isfile(infname):
-                    self.add_waveforms(infname, tag=tag)
+                    self.add_waveforms(infname, event_id=event_id, tag=tag)
                     if deletemseed: os.remove(infname)
                 elif os.path.isfile(outdir+'/'+evid+'.'+staid+'.no_resp.mseed'): no_resp+=1
         print '================================== End reading downloaded surface wave data =================================='
         print 'Number of file without resp:', no_resp
         return
+    
+    def get_body_waveforms(self, minDelta=30, maxDelta=150, channel='BHE,BHN,BHZ', phase='P',
+                        startoffset=-30., endoffset=60.0, verbose=True, rotation=True):
+        """Get body wave data from IRIS server
+        ====================================================================================================================
+        Input Parameters:
+        min/maxDelta    - minimum/maximum epicentral distance, in degree
+        channel         - Channel code, e.g. 'BHZ'.
+                            Last character (i.e. component) can be a wildcard (‘?’ or ‘*’) to fetch Z, N and E component.
+        phase           - body wave phase to be downloaded, arrival time will be computed using taup
+        start/endoffset - start and end offset for downloaded data
+        vmin, vmax      - minimum/maximum velocity for surface wave window
+        rotation        - rotate the seismogram to RT or not
+        =====================================================================================================================
+        """
+        client=Client('IRIS')
+        evnumb=0
+        L=len(self.events)
+        print '================================== Getting body wave data ====================================='
+        for event in self.events:
+            event_id=event.resource_id.id.split('=')[-1]
+            magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
+            event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
+            evnumb+=1
+            otime=event.origins[0].time 
+            print 'Event ' + str(evnumb)+' : '+ str(otime)+' '+ event_descrip+', '+Mtype+' = '+str(magnitude) 
+            evlo=event.origins[0].longitude; evla=event.origins[0].latitude; evdp=event.origins[0].depth/1000.
+            tag='body_ev_%05d' %evnumb
+            for staid in self.waveforms.list():
+                netcode, stacode=staid.split('.')
+                stla, elev, stlo=self.waveforms[staid].coordinates.values(); elev=elev/1000.
+                az, baz, dist = geodist.inv(evlo, evla, stlo, stla); dist=dist/1000.
+                if baz<0.: baz+=360.
+                Delta=obspy.geodetics.kilometer2degrees(dist)
+                if Delta<minDelta: continue
+                if Delta>maxDelta: continue
+                arrivals = taupmodel.get_travel_times(source_depth_in_km=evdp, distance_in_degree=Delta, phase_list=[phase])#, receiver_depth_in_km=0)
+                try:
+                    arr=arrivals[0]; arrival_time=arr.time; rayparam=arr.ray_param_sec_degree
+                except IndexError: continue
+                starttime=otime+arrival_time+startoffset; endtime=otime+arrival_time+endoffset
+                location=self.waveforms[staid].StationXML[0].stations[0].channels[0].location_code
+                try:
+                    st= client.get_waveforms(network=netcode, station=stacode, location=location, channel=channel,
+                            starttime=starttime, endtime=endtime, attach_response=True)
+                except:
+                    if verbose: print 'No data for:', staid
+                    continue
+                pre_filt = (0.04, 0.05, 20., 25.)
+                st.detrend()
+                st.remove_response(pre_filt=pre_filt, taper_fraction=0.1)
+                if rotation: st.rotate('NE->RT', back_azimuth=baz)
+                if verbose: print 'Getting data for:', staid
+                self.add_waveforms(st, event_id=event_id, tag=tag, labels=phase)
+            # print '===================================== Removing response ======================================='
+        return
+    
+    def get_body_waveforms_mp(self, outdir, minDelta=30, maxDelta=150, channel='BHE,BHN,BHZ', phase='P', startoffset=-30., endoffset=60.0,
+            verbose=False, subsize=1000, deletemseed=False, nprocess=6, snumb=0, enumb=None, rotation=True):
+        """Get body wave data from IRIS server
+        ====================================================================================================================
+        Input Parameters:
+        min/maxDelta    - minimum/maximum epicentral distance, in degree
+        channel         - Channel code, e.g. 'BHZ'.
+                            Last character (i.e. component) can be a wildcard (‘?’ or ‘*’) to fetch Z, N and E component.
+        phase           - body wave phase to be downloaded, arrival time will be computed using taup
+        start/endoffset - start and end offset for downloaded data
+        vmin, vmax      - minimum/maximum velocity for surface wave window
+        rotation        - rotate the seismogram to RT or not
+        deletemseed     - delete output MiniSeed files
+        nprocess        - number of processes
+        snumb, enumb    - start/end number of processing block
+        =====================================================================================================================
+        """
+        client=Client('IRIS')
+        evnumb=0
+        L=len(self.events)
+        if not os.path.isdir(outdir): os.makedirs(outdir)
+        reqwaveLst=[]
+        print '================================== Preparing download body wave data ======================================'
+        for event in self.events:
+            magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
+            event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
+            evnumb+=1
+            otime=event.origins[0].time 
+            print 'Event ' + str(evnumb)+' : '+ str(otime)+' '+ event_descrip+', '+Mtype+' = '+str(magnitude) 
+            evlo=event.origins[0].longitude; evla=event.origins[0].latitude; evdp=event.origins[0].depth/1000.
+            for staid in self.waveforms.list():
+                netcode, stacode=staid.split('.')
+                stla, elev, stlo=self.waveforms[staid].coordinates.values(); elev=elev/1000.
+                az, baz, dist = geodist.inv(evlo, evla, stlo, stla); dist=dist/1000.
+                if baz<0.: baz+=360.
+                Delta=obspy.geodetics.kilometer2degrees(dist)
+                if Delta<minDelta: continue
+                if Delta>maxDelta: continue
+                arrivals = taupmodel.get_travel_times(source_depth_in_km=evdp, distance_in_degree=Delta, phase_list=[phase])#, receiver_depth_in_km=0)
+                try:
+                    arr=arrivals[0]; arrival_time=arr.time; rayparam=arr.ray_param_sec_degree
+                except IndexError: continue
+                starttime=otime+arrival_time+startoffset; endtime=otime+arrival_time+endoffset
+                location=self.waveforms[staid].StationXML[0].stations[0].channels[0].location_code
+                reqwaveLst.append( requestInfo(evnumb=evnumb, network=netcode, station=stacode, location=location, channel=channel,
+                            starttime=starttime, endtime=endtime, attach_response=True, baz=baz) )
+        print '============================= Start multiprocessing download body wave data ==============================='
+        if len(reqwaveLst) > subsize:
+            Nsub = int(len(reqwaveLst)/subsize)
+            if enumb==None: enumb=Nsub
+            for isub in xrange(Nsub):
+                if isub < snumb: continue
+                if isub > enumb: continue
+                print 'Subset:', isub+1,'in',Nsub,'sets'
+                creqlst=reqwaveLst[isub*subsize:(isub+1)*subsize]
+                GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, pre_filt = (0.04, 0.05, 20., 25.), verbose=verbose, rotation=rotation)
+                pool = multiprocessing.Pool(processes=nprocess)
+                pool.map(GETDATA, creqlst) #make our results with a map call
+                pool.close() #we are not adding any more processes
+                pool.join() #tell it to wait until all threads are done before going on
+            creqlst=reqwaveLst[(isub+1)*subsize:]
+            GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, pre_filt = (0.04, 0.05, 20., 25.), verbose=verbose, rotation=rotation)
+            pool = multiprocessing.Pool(processes=nprocess)
+            pool.map(GETDATA, creqlst) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        else:
+            GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, pre_filt = (0.04, 0.05, 20., 25.), verbose=verbose, rotation=rotation)
+            pool = multiprocessing.Pool(processes=nprocess)
+            pool.map(GETDATA, reqwaveLst) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        print '============================= End of multiprocessing download body wave data =============================='
+        print '==================================== Reading downloaded body wave data ===================================='
+        evnumb=0
+        no_resp=0
+        for event in self.events:
+            event_id=event.resource_id.id.split('=')[-1]
+            magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
+            event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
+            evnumb+=1
+            evid='E%05d' %evnumb
+            tag='body_ev_%05d' %evnumb
+            print 'Event ' + str(evnumb)+' : '+event_descrip+', '+Mtype+' = '+str(magnitude) 
+            for staid in self.waveforms.list():
+                netcode, stacode=staid.split('.')
+                infname=outdir+'/'+evid+'.'+staid+'.mseed'
+                if os.path.isfile(infname):
+                    self.add_waveforms(infname, event_id=event_id, tag=tag, labels=phase)
+                    if deletemseed: os.remove(infname)
+                elif os.path.isfile(outdir+'/'+evid+'.'+staid+'.no_resp.mseed'): no_resp+=1
+        print '================================== End reading downloaded body wave data =================================='
+        print 'Number of file without resp:', no_resp
+        return
+        
+    def write2sac(self, network, station, evnumb, datatype='body'):
+        """ Extract data from ASDF to SAC file
+        ====================================================================================================================
+        Input Parameters:
+        network, station    - specify station
+        evnumb              - event id
+        datatype            - data type ('body' - body wave, 'sruf' - surface wave)
+        =====================================================================================================================
+        """
+        event = self.events[evnumb-1]
+        otime=event.origins[0].time
+        tag=datatype+'_ev_%05d' %evnumb
+        st=self.waveforms[network+'.'+station][tag]
+        stla, elev, stlo=self.waveforms[network+'.'+station].coordinates.values()
+        evlo=event.origins[0].longitude; evla=event.origins[0].latitude; evdp=event.origins[0].depth
+        for tr in st:
+            tr.stats.sac=obspy.core.util.attribdict.AttribDict()
+            tr.stats.sac['evlo']=evlo; tr.stats.sac['evla']=evla; tr.stats.sac['evdp']=evdp
+            tr.stats.sac['stlo']=stlo; tr.stats.sac['stla']=stla    
+        st.write(str(otime)+'..sac', format='sac')
+    
+    def get_obspy_trace(self, network, station, evnumb, datatype='body'):
+        """ Get obspy trace data from ASDF
+        ====================================================================================================================
+        Input Parameters:
+        network, station    - specify station
+        evnumb              - event id
+        datatype            - data type ('body' - body wave, 'sruf' - surface wave)
+        =====================================================================================================================
+        """
+        event = self.events[evnumb-1]
+        tag=datatype+'_ev_%05d' %evnumb
+        st=self.waveforms[network+'.'+station][tag]
+        stla, elev, stlo=self.waveforms[network+'.'+station].coordinates.values()
+        evlo=event.origins[0].longitude; evla=event.origins[0].latitude; evdp=event.origins[0].depth
+        for tr in st:
+            tr.stats.sac=obspy.core.util.attribdict.AttribDict()
+            tr.stats.sac['evlo']=evlo; tr.stats.sac['evla']=evla; tr.stats.sac['evdp']=evdp
+            tr.stats.sac['stlo']=stlo; tr.stats.sac['stla']=stla    
+        return st
+    
+    def compute_ref(self, inrefparam=CURefPy.InputRefparam(), savescaled=True, savemoveout=True, verbose=True):
+        """Compute receiver function and post processed data(moveout, stretchback)
+        ====================================================================================================================
+        Input Parameters:
+        inrefparam      - input parameters, refer to InputRefparam in CURefPy for details
+        savescaled      - save scaled post processed data
+        savemoveout     - save moveout data
+        =====================================================================================================================
+        """
+        print '================================== Receiver Function Analysis ======================================'
+        for staid in self.waveforms.list():
+            netcode, stacode=staid.split('.')
+            print 'Station: '+staid
+            stla, elev, stlo=self.waveforms[staid].coordinates.values()
+            evnumb=0
+            for event in self.events:
+                evnumb+=1
+                evid='E%05d' %evnumb
+                tag='body_ev_%05d' %evnumb
+                try: st=self.waveforms[staid][tag]
+                except KeyError: continue
+                phase=st[0].stats.asdf.labels[0]
+                if inrefparam.phase != '' and inrefparam.phase != phase: continue
+                evlo=event.origins[0].longitude; evla=event.origins[0].latitude; evdp=event.origins[0].depth
+                otime=event.origins[0].time
+                for tr in st:
+                    tr.stats.sac=obspy.core.util.attribdict.AttribDict()
+                    tr.stats.sac['evlo']=evlo; tr.stats.sac['evla']=evla; tr.stats.sac['evdp']=evdp
+                    tr.stats.sac['stlo']=stlo; tr.stats.sac['stla']=stla
+                if verbose:
+                    magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
+                    event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
+                    print 'Event ' + str(evnumb)+' : '+event_descrip+', '+Mtype+' = '+str(magnitude) 
+                refTr=CURefPy.RFTrace()
+                refTr.get_data(Ztr=st.select(component='Z')[0], RTtr=st.select(component=inrefparam.reftype)[0],
+                        tbeg=inrefparam.tbeg, tend=inrefparam.tend)
+                refTr.IterDeconv(tdel=inrefparam.tdel, f0 = inrefparam.f0, niter=inrefparam.niter,
+                        minderr=inrefparam.minderr, phase=phase )
+                ref_header=ref_header_default.copy()
+                ref_header['otime']=str(otime); ref_header['network']=netcode; ref_header['station']=stacode
+                ref_header['stla']=stla; ref_header['stlo']=stlo; ref_header['evla']=evla; ref_header['evlo']=evlo; ref_header['evdp']=evdp
+                ref_header['dist']=refTr.stats.sac['dist']; ref_header['az']=refTr.stats.sac['az']; ref_header['baz']=refTr.stats.sac['baz']
+                ref_header['delta']=refTr.stats.delta; ref_header['npts']=refTr.stats.npts; ref_header['b']=refTr.stats.sac['b']; ref_header['e']=refTr.stats.sac['e']
+                ref_header['arrival']=refTr.stats.sac['user5']; ref_header['phase']=phase; ref_header['tbeg']=inrefparam.tbeg; ref_header['tend']=inrefparam.tend
+                ref_header['hslowness']=refTr.stats.sac['user4']; ref_header['ghw']=inrefparam.f0; ref_header['VR']=refTr.stats.sac['user2']
+                staid_aux=netcode+'_'+stacode+'_'+phase+'/'+evid
+                self.add_auxiliary_data(data=refTr.data, data_type='Ref'+inrefparam.reftype, path=staid_aux, parameters=ref_header)
+                if not refTr.move_out(): continue
+                refTr.stretch_back()
+                postdbase=refTr.postdbase
+                ref_header['moveout']=postdbase.MoveOutFlag
+                if savescaled: self.add_auxiliary_data(data=postdbase.ampC, data_type='Ref'+inrefparam.reftype+'scaled', path=staid_aux, parameters=ref_header)
+                if savemoveout: self.add_auxiliary_data(data=postdbase.ampTC, data_type='Ref'+inrefparam.reftype+'moveout', path=staid_aux, parameters=ref_header)
+                self.add_auxiliary_data(data=postdbase.strback, data_type='Ref'+inrefparam.reftype+'streback', path=staid_aux, parameters=ref_header)
+        return
+    
+    def compute_ref_mp(self, outdir, inrefparam=CURefPy.InputRefparam(), savescaled=True, savemoveout=True, \
+                verbose=False, subsize=1000, deleteref=True, deletepost=True, nprocess=None):
+        """Compute receiver function and post processed data(moveout, stretchback) with multiprocessing
+        ====================================================================================================================
+        Input Parameters:
+        inrefparam      - input parameters, refer to InputRefparam in CURefPy for details
+        savescaled      - save scaled post processed data
+        savemoveout     - save moveout data
+        subsize         - subsize of processing list, use to prevent lock in multiprocessing process
+        deleteref       - delete SAC receiver function data
+        deletepost      - delete npz post processed data
+        nprocess        - number of processes
+        =====================================================================================================================
+        """
+        print '================================== Receiver Function Analysis ======================================'
+        print 'Preparing data for multiprocessing'
+        refLst=[]
+        for staid in self.waveforms.list():
+            netcode, stacode=staid.split('.')
+            print 'Station: '+staid
+            stla, elev, stlo=self.waveforms[staid].coordinates.values()
+            evnumb=0
+            outsta=outdir+'/'+staid
+            if not os.path.isdir(outsta): os.makedirs(outsta)
+            for event in self.events:
+                evnumb+=1
+                evid='E%05d' %evnumb
+                tag='body_ev_%05d' %evnumb
+                try: st=self.waveforms[staid][tag]
+                except KeyError: continue
+                phase=st[0].stats.asdf.labels[0]
+                if inrefparam.phase != '' and inrefparam.phase != phase: continue
+                evlo=event.origins[0].longitude; evla=event.origins[0].latitude; evdp=event.origins[0].depth
+                otime=event.origins[0].time
+                for tr in st:
+                    tr.stats.sac=obspy.core.util.attribdict.AttribDict()
+                    tr.stats.sac['evlo']=evlo; tr.stats.sac['evla']=evla; tr.stats.sac['evdp']=evdp
+                    tr.stats.sac['stlo']=stlo; tr.stats.sac['stla']=stla; tr.stats.sac['kuser0']=evid; tr.stats.sac['kuser1']=phase
+                if verbose:
+                    magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
+                    event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
+                    print 'Event ' + str(evnumb)+' : '+event_descrip+', '+Mtype+' = '+str(magnitude) 
+                refTr=CURefPy.RFTrace()
+                refTr.get_data(Ztr=st.select(component='Z')[0], RTtr=st.select(component=inrefparam.reftype)[0],
+                        tbeg=inrefparam.tbeg, tend=inrefparam.tend)
+                refLst.append( refTr )
+        print 'Start multiprocessing receiver function analysis !'
+        if len(refLst) > subsize:
+            Nsub = int(len(refLst)/subsize)
+            for isub in xrange(Nsub):
+                print 'Subset:', isub,'in',Nsub,'sets'
+                cstream=refLst[isub*subsize:(isub+1)*subsize]
+                REF = partial(ref4mp, outdir=outsta, inrefparam=inrefparam)
+                pool = multiprocessing.Pool(processes=nprocess)
+                pool.map(AFTAN, cstream) #make our results with a map call
+                pool.close() #we are not adding any more processes
+                pool.join() #tell it to wait until all threads are done before going on
+            cstream=refLst[(isub+1)*subsize:]
+            REF = partial(ref4mp, outdir=outsta, inrefparam=inrefparam)
+            pool = multiprocessing.Pool(processes=nprocess)
+            pool.map(REF, cstream) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        else:
+            REF = partial(ref4mp, outdir=outsta, inrefparam=inrefparam)
+            pool = multiprocessing.Pool(processes=nprocess)
+            pool.map(REF, refLst) #make our results with a map call
+            pool.close() #we are not adding any more processes
+            pool.join() #tell it to wait until all threads are done before going on
+        print 'End of multiprocessing receiver function analysis !'
+        print 'Start reading receiver function data !'
+        for staid in self.waveforms.list():
+            netcode, stacode=staid.split('.')
+            print 'Station: '+staid
+            stla, elev, stlo=self.waveforms[staid].coordinates.values()
+            outsta=outdir+'/'+staid
+            evnumb=0
+            for event in self.events:
+                evnumb+=1
+                evid='E%05d' %evnumb
+                sacfname=outsta+'/'+evid+'.sac'; postfname = outsta+'/'+evid+'.post.npz'
+                if not os.path.isfile(sacfname): continue
+                evlo=event.origins[0].longitude; evla=event.origins[0].latitude; evdp=event.origins[0].depth
+                otime=event.origins[0].time
+                refTr=obspy.read(sacfname)[0]
+                ref_header=ref_header_default.copy()
+                ref_header['otime']=str(otime); ref_header['network']=netcode; ref_header['station']=stacode
+                ref_header['stla']=stla; ref_header['stlo']=stlo; ref_header['evla']=evla; ref_header['evlo']=evlo; ref_header['evdp']=evdp
+                ref_header['dist']=refTr.stats.sac['dist']; ref_header['az']=refTr.stats.sac['az']; ref_header['baz']=refTr.stats.sac['baz']
+                ref_header['delta']=refTr.stats.delta; ref_header['npts']=refTr.stats.npts; ref_header['b']=refTr.stats.sac['b']; ref_header['e']=refTr.stats.sac['e']
+                ref_header['arrival']=refTr.stats.sac['user5']; ref_header['phase']=refTr.stats.sac['kuser1']; ref_header['tbeg']=inrefparam.tbeg; ref_header['tend']=inrefparam.tend
+                ref_header['hslowness']=refTr.stats.sac['user4']; ref_header['ghw']=inrefparam.f0; ref_header['VR']=refTr.stats.sac['user2']
+                staid_aux=netcode+'_'+stacode+'_'+phase+'/'+evid
+                self.add_auxiliary_data(data=refTr.data, data_type='Ref'+inrefparam.reftype, path=staid_aux, parameters=ref_header)
+                if deleteref: os.remove(sacfname)
+                if not os.path.isfile(postfname): continue
+                ref_header['moveout']=1
+                postArr=np.load(postfname)
+                ampC=postArr['arr_0']; ampTC=postArr['arr_1']; strback=postArr['arr_2']
+                if deletepost: os.remove(postfname)
+                if savescaled: self.add_auxiliary_data(data=ampC, data_type='Ref'+inrefparam.reftype+'scaled', path=staid_aux, parameters=ref_header)
+                if savemoveout: self.add_auxiliary_data(data=ampTC, data_type='Ref'+inrefparam.reftype+'moveout', path=staid_aux, parameters=ref_header)
+                self.add_auxiliary_data(data=strback, data_type='Ref'+inrefparam.reftype+'streback', path=staid_aux, parameters=ref_header)
+            if deleteref*deletepost: shutil.rmtree(outsta)
+        print 'End reading receiver function data !'       
+        return
+    
+    def harmonic_stripping(self, outdir, data_type='RefRstreback', VR=80, tdiff=0.08, phase='P', reftype='R'):
+        """Harmonic stripping analysis
+        ====================================================================================================================
+        Input Parameters:
+        outdir          - output directory
+        data_type       - datatype, default is 'RefRstreback', stretchback radial receiver function
+        VR              - threshold variance reduction for quality control
+        tdiff           - threshold trace difference for quality control
+        phase           - phase, default = 'P'
+        reftype         - receiver function type, default = 'R'
+        =====================================================================================================================
+        """
+        print '================================== Harmonic Stripping Analysis ======================================'
+        for staid in self.waveforms.list():
+            netcode, stacode=staid.split('.')
+            print 'Station: '+staid
+            stla, elev, stlo=self.waveforms[staid].coordinates.values()
+            evnumb=0
+            postLst=CURefPy.PostRefLst()
+            outsta=outdir+'/'+staid
+            if not os.path.isdir(outsta): os.makedirs(outsta)
+            for event in self.events:
+                evnumb+=1
+                evid='E%05d' %evnumb
+                try: subdset=self.auxiliary_data[data_type][netcode+'_'+stacode+'_'+phase][evid]
+                except KeyError: continue
+                ref_header=subdset.parameters
+                if ref_header['moveout'] <0 or ref_header['VR'] < VR: continue
+                pdbase=CURefPy.PostDatabase()
+                pdbase.strback=subdset.data.value; pdbase.header=subdset.parameters
+                postLst.append(pdbase)
+            qcLst = postLst.remove_bad(outsta)
+            qcLst = qcLst.QControl_tdiff(tdiff=tdiff)
+            qcLst.HarmonicStripping(outdir=outsta, stacode=staid)
+            staid_aux=netcode+'_'+stacode+'_'+phase
+            # wmean.txt
+            wmeanArr=np.loadtxt(outsta+'/wmean.txt'); os.remove(outsta+'/wmean.txt')
+            self.add_auxiliary_data(data=wmeanArr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/wmean', parameters={})
+            # bin_%d_txt
+            for binfname in glob.glob(outsta+'/bin_*_txt'):
+                binArr=np.loadtxt(binfname); os.remove(binfname)
+                temp=binfname.split('/')[-1]
+                self.add_auxiliary_data(data=binArr, data_type='Ref'+reftype+'HS',
+                        path=staid_aux+'/bin/'+temp.split('_')[0]+'_'+temp.split('_')[1], parameters={})
+            for binfname in glob.glob(outsta+'/bin_*_rf.dat'):
+                binArr=np.loadtxt(binfname); os.remove(binfname)
+                temp=binfname.split('/')[-1]
+                self.add_auxiliary_data(data=binArr, data_type='Ref'+reftype+'HS',
+                        path=staid_aux+'/bin_rf/'+temp.split('_')[0]+'_'+temp.split('_')[1], parameters={})
+            # A0.dat
+            A0Arr=np.loadtxt(outsta+'/A0.dat'); os.remove(outsta+'/A0.dat')
+            self.add_auxiliary_data(data=A0Arr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/A0', parameters={})
+            # A1.dat
+            A1Arr=np.loadtxt(outsta+'/A1.dat'); os.remove(outsta+'/A1.dat')
+            self.add_auxiliary_data(data=A1Arr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/A1', parameters={})
+            # A2.dat
+            A2Arr=np.loadtxt(outsta+'/A2.dat'); os.remove(outsta+'/A2.dat')
+            self.add_auxiliary_data(data=A2Arr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/A2', parameters={})
+            # A0_A1_A2.dat
+            A0A1A2Arr=np.loadtxt(outsta+'/A0_A1_A2.dat'); os.remove(outsta+'/A0_A1_A2.dat')
+            self.add_auxiliary_data(data=A0A1A2Arr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/A0_A1_A2', parameters={})
+            evnumb=0
+            for event in self.events:
+                evnumb+=1
+                evid='E%05d' %evnumb
+                try: subdset=self.auxiliary_data[data_type][netcode+'_'+stacode+'_'+phase][evid]
+                except KeyError: continue
+                ref_header=subdset.parameters
+                if ref_header['moveout'] <0 or ref_header['VR'] < VR: continue
+                otime=ref_header['otime']; baz=ref_header['baz']
+                fsfx=str(int(baz))+'_'+staid+'_'+otime+'.out.back'
+                diff_fname=outsta+'/diffstre_'+fsfx
+                obsfname=outsta+'/obsstre_'+fsfx
+                repfname=outsta+'/repstre_'+fsfx
+                rep0fname=outsta+'/0repstre_'+fsfx
+                rep1fname=outsta+'/1repstre_'+fsfx
+                rep2fname=outsta+'/2repstre_'+fsfx
+                prefname=outsta+'/prestre_'+fsfx
+                if not (os.path.isfile(diff_fname) and os.path.isfile(obsfname) and os.path.isfile(repfname) and \
+                        os.path.isfile(rep0fname) and os.path.isfile(rep1fname) and os.path.isfile(rep2fname) and os.path.isfile(prefname) ):
+                    continue
+                diffArr=np.loadtxt(diff_fname); os.remove(diff_fname)
+                obsArr=np.loadtxt(obsfname); os.remove(obsfname)
+                repArr=np.loadtxt(repfname); os.remove(repfname)
+                rep0Arr=np.loadtxt(rep0fname); os.remove(rep0fname)
+                rep1Arr=np.loadtxt(rep1fname); os.remove(rep1fname)
+                rep2Arr=np.loadtxt(rep2fname); os.remove(rep2fname)
+                preArr=np.loadtxt(prefname); os.remove(prefname)
+                self.add_auxiliary_data(data=obsArr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/obs/'+evid, parameters=ref_header)
+                self.add_auxiliary_data(data=diffArr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/diff/'+evid, parameters=ref_header)
+                self.add_auxiliary_data(data=repArr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/rep/'+evid, parameters=ref_header)
+                self.add_auxiliary_data(data=rep0Arr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/rep0/'+evid, parameters=ref_header)
+                self.add_auxiliary_data(data=rep1Arr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/rep1/'+evid, parameters=ref_header)
+                self.add_auxiliary_data(data=rep2Arr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/rep2/'+evid, parameters=ref_header)
+                self.add_auxiliary_data(data=preArr, data_type='Ref'+reftype+'HS',
+                    path=staid_aux+'/pre/'+evid, parameters=ref_header)
+        
+        return
+    
+    def plot_ref(self, network, station, phase='P', datatype='RefRHS'):
+        """plot receiver function
+        ====================================================================================================================
+        Input Parameters:
+        network, station    - specify station
+        phase               - phase, default = 'P'
+        datatype            - datatype, default = 'RefRHS', harmonic striped radial receiver function
+        =====================================================================================================================
+        """
+        obsHSstream=CURefPy.HStripStream()
+        diffHSstream=CURefPy.HStripStream()
+        repHSstream=CURefPy.HStripStream()
+        rep0HSstream=CURefPy.HStripStream()
+        rep1HSstream=CURefPy.HStripStream()
+        rep2HSstream=CURefPy.HStripStream()
+        subgroup=self.auxiliary_data[datatype][network+'_'+station+'_'+phase]
+        stla, elev, stlo=self.waveforms[network+'.'+station].coordinates.values()
+        for evid in subgroup.obs.list():
+            ref_header=subgroup['obs'][evid].parameters
+            dt=ref_header['delta']; baz=ref_header['baz']; eventT=ref_header['otime']
+            obsArr=subgroup['obs'][evid].data.value
+            starttime=obspy.core.utcdatetime.UTCDateTime(eventT)+ref_header['arrival']-ref_header['tbeg']+30.
+            obsHSstream.get_trace(network=network, station=station, indata=obsArr[:, 1], baz=baz, dt=dt, starttime=starttime)
             
+            diffArr=subgroup['diff'][evid].data.value
+            diffHSstream.get_trace(network=network, station=station, indata=diffArr[:, 1], baz=baz, dt=dt, starttime=starttime)
+            
+            repArr=subgroup['rep'][evid].data.value
+            repHSstream.get_trace(network=network, station=station, indata=repArr[:, 1], baz=baz, dt=dt, starttime=starttime)
+            
+            rep0Arr=subgroup['rep0'][evid].data.value
+            rep0HSstream.get_trace(network=network, station=station, indata=rep0Arr[:, 1], baz=baz, dt=dt, starttime=starttime)
+            
+            rep1Arr=subgroup['rep1'][evid].data.value
+            rep1HSstream.get_trace(network=network, station=station, indata=rep1Arr[:, 1], baz=baz, dt=dt, starttime=starttime)
+            
+            rep2Arr=subgroup['rep2'][evid].data.value
+            rep2HSstream.get_trace(network=network, station=station, indata=rep2Arr[:, 1], baz=baz, dt=dt, starttime=starttime)
+        self.HSDataBase=CURefPy.HarmonicStrippingDataBase(obsST=obsHSstream, diffST=diffHSstream, repST=repHSstream,\
+            repST0=rep0HSstream, repST1=rep1HSstream, repST2=rep2HSstream)
+        self.HSDataBase.PlotHSStreams(stacode=network+'.'+station, longitude=stlo, latitude=stla)
+        return
+
     def array_processing(self, evnumb=1, win_len=20., win_frac=0.2, sll_x=-3.0, slm_x=3.0, sll_y=-3.0, slm_y=3.0, sl_s=0.03,
             frqlow=0.0125, frqhigh=0.02, semb_thres=-1e9, vel_thres=-1e9, prewhiten=0, verbose=True, coordsys='lonlat', timestamp='mlabday',
                 method=0, minlat=None, maxlat=None, minlon=None, maxlon=None, lon0=None, lat0=None, radius=None,
@@ -2000,14 +2526,14 @@ class quakeASDF(pyasdf.ASDFDataSet):
             for staid in staLst:
                 netcode, stacode=staid.split('.')
                 stla, stz, stlo=self.waveforms[staid].coordinates.values()
-                az, baz, dist = geodist.inv(stlo, stla, evlo, evla); dist=dist/1000.
+                az, baz, dist = geodist.inv(evlo, evla, stlo, stla); dist=dist/1000. 
                 if baz<0: baz+=360.
                 try:
                     if channel!='R' or channel!='T':
                         inST=self.waveforms[staid][tag].select(component=channel)
                     else:
                         st=self.waveforms[staid][tag]
-                        st.rotate('NE->RT', backazimuth=baz)
+                        st.rotate('NE->RT', backazimuth=baz) 
                         inST=st.select(component=channel)
                 except KeyError: continue
                 if len(inST)==0: continue
@@ -2089,14 +2615,15 @@ class quakeASDF(pyasdf.ASDFDataSet):
             for staid in staLst:
                 netcode, stacode=staid.split('.')
                 stla, stz, stlo=self.waveforms[staid].coordinates.values()
-                az, baz, dist = geodist.inv(stlo, stla, evlo, evla); dist=dist/1000.
+                # event should be initial point, station is end point, then we use baz to to rotation!
+                az, baz, dist = geodist.inv(evlo, evla, stlo, stla); dist=dist/1000. 
                 if baz<0: baz+=360.
                 try:
                     if channel!='R' or channel!='T':
                         inST=self.waveforms[staid][tag].select(component=channel)
                     else:
                         st=self.waveforms[staid][tag]
-                        st.rotate('NE->RT', backazimuth=baz)
+                        st.rotate('NE->RT', backazimuth=baz) # need check
                         inST=st.select(component=channel)
                 except KeyError: continue
                 if len(inST)==0: continue
@@ -2311,8 +2838,6 @@ class quakeASDF(pyasdf.ASDFDataSet):
         return
     
     
-
-
 def aftan4mp_quake(aTr, outdir, inftan, prephdir, f77, pfx):
     # print aTr.stats.network+'.'+aTr.stats.station
     if prephdir !=None:
@@ -2333,8 +2858,7 @@ def aftan4mp_quake(aTr, outdir, inftan, prephdir, f77, pfx):
     return
 
 
-def get_waveforms4mp(reqinfo, outdir, client, verbose=True):
-    
+def get_waveforms4mp(reqinfo, outdir, client, pre_filt, verbose=True, rotation=False):
     try:
         st = client.get_waveforms(network=reqinfo.network, station=reqinfo.station, location=reqinfo.location, channel=reqinfo.channel,
                 starttime=reqinfo.starttime, endtime=reqinfo.endtime, attach_response=reqinfo.attach_response)
@@ -2344,7 +2868,6 @@ def get_waveforms4mp(reqinfo, outdir, client, verbose=True):
     if verbose: print 'Getting data for:', reqinfo.network+'.'+reqinfo.station
     # print '===================================== Removing response ======================================='
     evid='E%05d' %reqinfo.evnumb
-    pre_filt = (0.001, 0.005, 1, 100.0)
     st.detrend()
     try:
         st.remove_response(pre_filt=pre_filt, taper_fraction=0.1)
@@ -2360,5 +2883,15 @@ def get_waveforms4mp(reqinfo, outdir, client, verbose=True):
         if not get_resp:
             st.write(outdir+'/'+evid+'.'+reqinfo.network+'.'+reqinfo.station+'.no_resp.mseed', format='mseed')
             return
+    if rotation: st.rotate('NE->RT', back_azimuth=reqinfo.baz)
     st.write(outdir+'/'+evid+'.'+reqinfo.network+'.'+reqinfo.station+'.mseed', format='mseed')
     return
+
+def ref4mp(refTr, outdir, inrefparam):
+    refTr.IterDeconv(tdel=inrefparam.tdel, f0 = inrefparam.f0, niter=inrefparam.niter,
+            minderr=inrefparam.minderr, phase=refTr.Ztr.stats.sac['kuser1'] )
+    if not refTr.move_out(): return
+    refTr.stretch_back()
+    refTr.save_data(outdir)
+    return
+

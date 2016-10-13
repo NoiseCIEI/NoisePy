@@ -1,7 +1,7 @@
 import ASDFDBase
 import numpy as np
 import timeit
-# dset=ASDFDBase.quakeASDF('../ref_ALASKA.h5')
+dset=ASDFDBase.quakeASDF('../ref_ALASKA.h5')
 # dset.get_events(startdate='2010-9-21', enddate='2015-9-21', Mmin=5.5)
 
 # dset=ASDFDBase.quakeASDF('../WUS_quake_inv.h5')

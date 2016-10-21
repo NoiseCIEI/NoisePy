@@ -5,9 +5,9 @@ dset=ASDFDBase.quakeASDF('/work3/leon/WUS_quake.h5')
 # dset.get_events(startdate='2005-1-01', enddate='2011-12-31', Mmin=5.5, magnitudetype='MS')
 # dset.get_stations(startdate='2005-1-01', enddate='2011-12-31', channel='LHZ', network='TA,US,IU,CI,AZ,BK,NN,UU' ,
 #         minlatitude=25.0, maxlatitude=50.0, minlongitude=-130.0, maxlongitude=-100.0)
-dset.get_surf_waveforms_mp(outdir='/work3/leon/downloaded_waveforms', subsize=1000, deletemseed=True, nprocess=6, snumb=1600)
+dset.get_surf_waveforms_mp(outdir='/work3/leon/downloaded_waveforms', subsize=1000, deletemseed=True, nprocess=6, snumb=1930)
 # dset.quake_prephp(outdir='../PRE_PHP')
-
+    
 # try:
 #     del dset.auxiliary_data.DISPbasic1
 # except:

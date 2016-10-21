@@ -1604,6 +1604,80 @@ class quakeASDF(pyasdf.ASDFDataSet):
         self.add_quakeml(outcatalog)
         return
     
+    def _get_basemap(self, projection='lambert', geopolygons=None, resolution='i'):
+        """Plot data with contour
+        """
+        # fig=plt.figure(num=None, figsize=(12, 12), dpi=80, facecolor='w', edgecolor='k')
+        lat_centre = (self.maxlat+self.minlat)/2.0
+        lon_centre = (self.maxlon+self.minlon)/2.0
+        if projection=='merc':
+            m=Basemap(projection='merc', llcrnrlat=self.minlat-5., urcrnrlat=self.maxlat+5., llcrnrlon=self.minlon-5.,
+                      urcrnrlon=self.maxlon+5., lat_ts=20, resolution=resolution)
+            m.drawparallels(np.arange(-80.0,80.0,5.0), labels=[1,0,0,1])
+            m.drawmeridians(np.arange(-170.0,170.0,5.0), labels=[1,0,0,1])
+            m.drawstates(color='g', linewidth=2.)
+        elif projection=='global':
+            m=Basemap(projection='ortho',lon_0=lon_centre, lat_0=lat_centre, resolution=resolution)
+            m.drawparallels(np.arange(-80.0,80.0,10.0), labels=[1,0,0,1])
+            m.drawmeridians(np.arange(-170.0,170.0,10.0), labels=[1,0,0,1])
+        
+        elif projection=='regional_ortho':
+            m1 = Basemap(projection='ortho', lon_0=self.minlon, lat_0=self.minlat, resolution='l')
+            m = Basemap(projection='ortho', lon_0=self.minlon, lat_0=self.minlat, resolution=resolution,\
+                llcrnrx=0., llcrnry=0., urcrnrx=m1.urcrnrx/mapfactor, urcrnry=m1.urcrnry/3.5)
+            m.drawparallels(np.arange(-80.0,80.0,10.0), labels=[1,0,0,0],  linewidth=2,  fontsize=20)
+            m.drawmeridians(np.arange(-170.0,170.0,10.0),  linewidth=2)
+        elif projection=='lambert':
+            distEW, az, baz=obspy.geodetics.gps2dist_azimuth(self.minlat, self.minlon,
+                                self.minlat, self.maxlon) # distance is in m
+            distNS, az, baz=obspy.geodetics.gps2dist_azimuth(self.minlat, self.minlon,
+                                self.maxlat+2., self.minlon) # distance is in m
+            m = Basemap(width=distEW, height=distNS, rsphere=(6378137.00,6356752.3142), resolution='l', projection='lcc',\
+                lat_1=self.minlat, lat_2=self.maxlat, lon_0=lon_centre, lat_0=lat_centre+1)
+            m.drawparallels(np.arange(-80.0,80.0,10.0), linewidth=1, dashes=[2,2], labels=[1,1,0,0], fontsize=15)
+            m.drawmeridians(np.arange(-170.0,170.0,10.0), linewidth=1, dashes=[2,2], labels=[0,0,1,0], fontsize=15)
+        m.drawcoastlines(linewidth=1.0)
+        m.drawcountries(linewidth=1.)
+        m.fillcontinents(lake_color='#99ffff',zorder=0.2)
+        m.drawmapboundary(fill_color="white")
+        try:
+            geopolygons.PlotPolygon(inbasemap=m)
+        except:
+            pass
+        return m
+    
+    def plot_events(self, projection='lambert', valuetype='depth', geopolygons=None, showfig=True, vmin=None, vmax=None):
+        evlons=np.array([])
+        evlats=np.array([])
+        values=np.array([])
+        for event in self.events:
+            event_id=event.resource_id.id.split('=')[-1]
+            magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
+            otime=event.origins[0].time
+            evlo=event.origins[0].longitude; evla=event.origins[0].latitude; evdp=event.origins[0].depth/1000.
+            evlons=np.append(evlons, evlo); evlats = np.append(evlats, evla);
+            if valuetype=='depth': values=np.append(values, evdp)
+            elif valuetype=='mag': values=np.append(values, magnitude)
+        # self.minlat=evlats.min()-1.; self.maxlat=evlats.max()+1.
+        # self.minlon=evlons.min()-1.; self.maxlon=evlons.max()+1.
+        self.minlat=15; self.maxlat=50
+        self.minlon=80; self.maxlon=135
+        m=self._get_basemap(projection=projection, geopolygons=geopolygons)
+        import pycpt
+        cmap=pycpt.load.gmtColormap('./GMT_panoply.cpt')
+        # cmap =discrete_cmap(int((vmax-vmin)/0.1)+1, cmap)
+        x, y=m(evlons, evlats)
+        if values.size!=0:
+            im=m.scatter(x, y, marker='o', s=300, c=values, cmap=cmap, vmin=vmin, vmax=vmax)
+            cb = m.colorbar(im, "bottom", size="3%", pad='2%')
+        else: m.plot(x,y,'o')
+        etime=self.events[0].origins[0].time
+        stime=self.events[-1].origins[0].time
+        plt.suptitle('Number of event: '+str(len(self.events))+' time range: '+str(stime)+' - '+str(etime), fontsize=20 )
+        if showfig: plt.show()
+        
+        
+    
     def get_stations(self, startdate=None, enddate=None,  network=None, station=None, location=None, channel=None,
             minlatitude=None, maxlatitude=None, minlongitude=None, maxlongitude=None,
                 latitude=None, longitude=None, minradius=None, maxradius=None):
@@ -1723,6 +1797,8 @@ class quakeASDF(pyasdf.ASDFDataSet):
         L=len(self.events)
         if not os.path.isdir(outdir): os.makedirs(outdir)
         reqwaveLst=[]
+        swave=snumb*subsize
+        iwave=0
         print '================================= Preparing for surface wave data download ==================================='
         for event in self.events:
             eventid=event.resource_id.id.split('=')[-1]
@@ -1740,7 +1816,8 @@ class quakeASDF(pyasdf.ASDFDataSet):
                 commontime=False
             for staid in self.waveforms.list():
                 netcode, stacode=staid.split('.')
-                # if stacode!='A14A': continue
+                iwave+=1
+                if iwave < swave: continue
                 stla, elev, stlo=self.waveforms[staid].coordinates.values()
                 if not commontime:
                     dist, az, baz=obspy.geodetics.gps2dist_azimuth(evla, evlo, stla, stlo) # distance is in m
@@ -1754,10 +1831,10 @@ class quakeASDF(pyasdf.ASDFDataSet):
         print '============================= Start multiprocessing download surface wave data ==============================='
         if len(reqwaveLst) > subsize:
             Nsub = int(len(reqwaveLst)/subsize)
-            if enumb==None: enumb=Nsub
+            # if enumb==None: enumb=Nsub
             for isub in xrange(Nsub):
-                if isub < snumb: continue
-                if isub > enumb: continue
+                # if isub < snumb: continue
+                # if isub > enumb: continue
                 print 'Subset:', isub+1,'in',Nsub,'sets'
                 creqlst=reqwaveLst[isub*subsize:(isub+1)*subsize]
                 GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, pre_filt = (0.001, 0.005, 1, 100.0), verbose=verbose, rotation=False)
@@ -1879,6 +1956,8 @@ class quakeASDF(pyasdf.ASDFDataSet):
         if not os.path.isdir(outdir): os.makedirs(outdir)
         reqwaveLst=[]
         print '================================== Preparing download body wave data ======================================'
+        swave=snumb*subsize
+        iwave=0
         for event in self.events:
             magnitude=event.magnitudes[0].mag; Mtype=event.magnitudes[0].magnitude_type
             event_descrip=event.event_descriptions[0].text+', '+event.event_descriptions[0].type
@@ -1887,6 +1966,8 @@ class quakeASDF(pyasdf.ASDFDataSet):
             print 'Event ' + str(evnumb)+' : '+ str(otime)+' '+ event_descrip+', '+Mtype+' = '+str(magnitude) 
             evlo=event.origins[0].longitude; evla=event.origins[0].latitude; evdp=event.origins[0].depth/1000.
             for staid in self.waveforms.list():
+                iwave+=1
+                if iwave < swave: continue
                 netcode, stacode=staid.split('.')
                 stla, elev, stlo=self.waveforms[staid].coordinates.values(); elev=elev/1000.
                 az, baz, dist = geodist.inv(evlo, evla, stlo, stla); dist=dist/1000.
@@ -1905,10 +1986,10 @@ class quakeASDF(pyasdf.ASDFDataSet):
         print '============================= Start multiprocessing download body wave data ==============================='
         if len(reqwaveLst) > subsize:
             Nsub = int(len(reqwaveLst)/subsize)
-            if enumb==None: enumb=Nsub
+            # if enumb==None: enumb=Nsub
             for isub in xrange(Nsub):
-                if isub < snumb: continue
-                if isub > enumb: continue
+                # if isub < snumb: continue
+                # if isub > enumb: continue
                 print 'Subset:', isub+1,'in',Nsub,'sets'
                 creqlst=reqwaveLst[isub*subsize:(isub+1)*subsize]
                 GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, pre_filt = (0.04, 0.05, 20., 25.), verbose=verbose, rotation=rotation)
@@ -2838,6 +2919,8 @@ class quakeASDF(pyasdf.ASDFDataSet):
         return
     
     
+    
+    
 def aftan4mp_quake(aTr, outdir, inftan, prephdir, f77, pfx):
     # print aTr.stats.network+'.'+aTr.stats.station
     if prephdir !=None:
@@ -2860,31 +2943,34 @@ def aftan4mp_quake(aTr, outdir, inftan, prephdir, f77, pfx):
 
 def get_waveforms4mp(reqinfo, outdir, client, pre_filt, verbose=True, rotation=False):
     try:
-        st = client.get_waveforms(network=reqinfo.network, station=reqinfo.station, location=reqinfo.location, channel=reqinfo.channel,
-                starttime=reqinfo.starttime, endtime=reqinfo.endtime, attach_response=reqinfo.attach_response)
-    except:
-        if verbose: print 'No data for:', reqinfo.network+'.'+reqinfo.station
-        return
-    if verbose: print 'Getting data for:', reqinfo.network+'.'+reqinfo.station
-    # print '===================================== Removing response ======================================='
-    evid='E%05d' %reqinfo.evnumb
-    st.detrend()
-    try:
-        st.remove_response(pre_filt=pre_filt, taper_fraction=0.1)
-    except ValueError:
-        N=10; i=0; get_resp=False
-        while (i < N) and (not get_resp):
+        try:
             st = client.get_waveforms(network=reqinfo.network, station=reqinfo.station, location=reqinfo.location, channel=reqinfo.channel,
                     starttime=reqinfo.starttime, endtime=reqinfo.endtime, attach_response=reqinfo.attach_response)
-            try:
-                st.remove_response(pre_filt=pre_filt, taper_fraction=0.1)
-                get_resp=True
-            except ValueError: i+=1
-        if not get_resp:
-            st.write(outdir+'/'+evid+'.'+reqinfo.network+'.'+reqinfo.station+'.no_resp.mseed', format='mseed')
+            st.detrend()
+        except:
+            if verbose: print 'No data for:', reqinfo.network+'.'+reqinfo.station
             return
-    if rotation: st.rotate('NE->RT', back_azimuth=reqinfo.baz)
-    st.write(outdir+'/'+evid+'.'+reqinfo.network+'.'+reqinfo.station+'.mseed', format='mseed')
+        if verbose: print 'Getting data for:', reqinfo.network+'.'+reqinfo.station
+        # print '===================================== Removing response ======================================='
+        evid='E%05d' %reqinfo.evnumb
+        try:
+            st.remove_response(pre_filt=pre_filt, taper_fraction=0.1)
+        except :
+            N=10; i=0; get_resp=False
+            while (i < N) and (not get_resp):
+                st = client.get_waveforms(network=reqinfo.network, station=reqinfo.station, location=reqinfo.location, channel=reqinfo.channel,
+                        starttime=reqinfo.starttime, endtime=reqinfo.endtime, attach_response=reqinfo.attach_response)
+                try:
+                    st.remove_response(pre_filt=pre_filt, taper_fraction=0.1)
+                    get_resp=True
+                except : i+=1
+            if not get_resp:
+                st.write(outdir+'/'+evid+'.'+reqinfo.network+'.'+reqinfo.station+'.no_resp.mseed', format='mseed')
+                return
+        if rotation: st.rotate('NE->RT', back_azimuth=reqinfo.baz)
+        st.write(outdir+'/'+evid+'.'+reqinfo.network+'.'+reqinfo.station+'.mseed', format='mseed')
+    except:
+        print 'Unknown error for:'+evid+'.'+reqinfo.network+'.'+reqinfo.station
     return
 
 def ref4mp(refTr, outdir, inrefparam):

@@ -91,7 +91,7 @@ class EikonalTomoDataSet(h5py.File):
             except:
                 runid+=1
                 continue
-        group.attrs.create(name = fieldtype, data=fieldtype[1:])
+        group.attrs.create(name = 'fieldtype', data=fieldtype[1:])
         inDbase=pyasdf.ASDFDataSet(inasdffname)
         pers = self.attrs['period_array']
         minlon=self.attrs['minlon']
@@ -176,7 +176,7 @@ class EikonalTomoDataSet(h5py.File):
             except:
                 runid+=1
                 continue
-        group.attrs.create(name = fieldtype, data=fieldtype[1:])
+        group.attrs.create(name = 'fieldtype', data=fieldtype[1:])
         inDbase=pyasdf.ASDFDataSet(inasdffname)
         pers = self.attrs['period_array']
         minlon=self.attrs['minlon']
@@ -286,7 +286,7 @@ class EikonalTomoDataSet(h5py.File):
         if merge:
             try:
                 group=self.create_group( name = 'Eikonal_run_'+str(runid) )
-                group.attrs.create(name = fieldtype, data=fieldtype[1:])
+                group.attrs.create(name = 'fieldtype', data=fieldtype[1:])
             except ValueError:
                 print 'Merging Eikonal run id: ',runid
                 pass
@@ -299,7 +299,7 @@ class EikonalTomoDataSet(h5py.File):
                 except:
                     runid+=1
                     continue
-            group.attrs.create(name = fieldtype, data=fieldtype[1:])
+            group.attrs.create(name = 'fieldtype', data=fieldtype[1:])
         inDbase=pyasdf.ASDFDataSet(inasdffname)
         pers = self.attrs['period_array']
         minlon=self.attrs['minlon']
@@ -405,7 +405,7 @@ class EikonalTomoDataSet(h5py.File):
         if merge:
             try:
                 group=self.create_group( name = 'Eikonal_run_'+str(runid) )
-                group.attrs.create(name = fieldtype, data=fieldtype[1:])
+                group.attrs.create(name = 'fieldtype', data=fieldtype[1:])
             except ValueError:
                 print 'Merging Eikonal run id: ',runid
                 pass
@@ -418,7 +418,7 @@ class EikonalTomoDataSet(h5py.File):
                 except:
                     runid+=1
                     continue
-            group.attrs.create(name = fieldtype, data=fieldtype[1:])
+            group.attrs.create(name = 'fieldtype', data=fieldtype[1:])
         inDbase=pyasdf.ASDFDataSet(inasdffname)
         pers = self.attrs['period_array']
         minlon=self.attrs['minlon']
@@ -566,9 +566,9 @@ class EikonalTomoDataSet(h5py.File):
             Nmeasure=np.zeros((Nlat-4, Nlon-4))
             weightArr=np.zeros((Nevent, Nlat-4, Nlon-4))
             slownessArr=np.zeros((Nevent, Nlat-4, Nlon-4))
-            aziArr=np.zeros((Nevent, Nlat-4, Nlon-4))
-            reason_nArr=np.zeros((Nevent, Nlat-4, Nlon-4))
-            validArr=np.zeros((Nevent, Nlat-4, Nlon-4))
+            aziArr=np.zeros((Nevent, Nlat-4, Nlon-4), dtype='float32')
+            reason_nArr=np.zeros((Nevent, Nlat-4, Nlon-4), dtype='int16')
+            validArr=np.zeros((Nevent, Nlat-4, Nlon-4), dtype='int16')
             for iev in xrange(Nevent):
                 evid=per_group.keys()[iev]
                 event_group=per_group[evid]
@@ -593,18 +593,21 @@ class EikonalTomoDataSet(h5py.File):
             azi_event1=np.broadcast_to(aziArr, (Nevent, Nevent, Nlat-4, Nlon-4))
             azi_event2=np.swapaxes(azi_event1, 0, 1)
             validArr[reason_nArr==0]=1
-            validArr4=np.broadcast_to(validArr, (Nevent, Nevent, Nlat-4, Nlon-4))
             # use numexpr for very large array manipulations
             del_aziArr=numexpr.evaluate('abs(azi_event1-azi_event2)')
+            del_aziArr=del_aziArr.astype('int16')
+            validArr4=np.broadcast_to(validArr, (Nevent, Nevent, Nlat-4, Nlon-4))
             index_azi=numexpr.evaluate('(1*(del_aziArr<20)+1*(del_aziArr>340))*validArr4')
             weightArr=numexpr.evaluate('sum(index_azi, 1)')
+	    index_azi = np.array([]); del_aziArr = np.array([]); validArr4 = np.array([])
             weightArr[reason_nArr!=0]=0
+            weightArr = weightArr.astype('float32')
             weightArr[weightArr!=0]=1./weightArr[weightArr!=0]
             weightsumArr=np.sum(weightArr, axis=0)
             ###########################################
             # reduce large weight to some value.
             ###########################################
-            avgArr=np.zeros((Nlat-4, Nlon-4))
+            avgArr=np.zeros((Nlat-4, Nlon-4), dtype='float32')
             avgArr[Nmeasure!=0]=weightsumArr[Nmeasure!=0]/Nmeasure[Nmeasure!=0]
             stdArr=np.sum( (weightArr-avgArr)**2, axis=0)
             stdArr[Nmeasure!=0]=stdArr[Nmeasure!=0]/Nmeasure[Nmeasure!=0]
@@ -746,14 +749,15 @@ class EikonalTomoDataSet(h5py.File):
     def _get_lon_lat_arr(self, ncut=2):
         """Get longitude/latitude array
         """
-        minlon=self.attrs['minlon']
-        maxlon=self.attrs['maxlon']
-        minlat=self.attrs['minlat']
-        maxlat=self.attrs['maxlat']
-        dlon=self.attrs['dlon']
-        dlat=self.attrs['dlat']
-        self.lons=np.arange((maxlon-minlon)/dlon+1-2*ncut)*dlon+minlon+ncut*dlon
-        self.lats=np.arange((maxlat-minlat)/dlat+1-2*ncut)*dlat+minlat+ncut*dlat
+        minlon=float(self.attrs['minlon'])
+        maxlon=float(self.attrs['maxlon'])
+        minlat=float(self.attrs['minlat'])
+        maxlat=float(self.attrs['maxlat'])
+        dlon=float(self.attrs['dlon'])
+        dlat=float(self.attrs['dlat'])
+	ncut=float(ncut)
+        self.lons=np.arange(int((maxlon-minlon)/dlon)+1-2*ncut)*dlon+minlon+ncut*dlon
+        self.lats=np.arange(int((maxlat-minlat)/dlat)+1-2*ncut)*dlat+minlat+ncut*dlat
         self.Nlon=self.lons.size; self.Nlat=self.lats.size
         self.lonArr, self.latArr = np.meshgrid(self.lons, self.lats)
         return

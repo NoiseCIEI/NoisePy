@@ -7,7 +7,7 @@ import numpy as np
 # f='SES.174S110.SAC'
 # f='./sac_data/SES.98S43.SAC'
 # f='/work3/leon/COR_TEST/2008.APR/COR/109C/COR_109C_BHZ_R21A_BHZ.SAC'
-f='./COR.sac'
+f='./aftan_test_data/COR_SUMG_NEEM.SAC'
 st=obspy.read(f)
 tr=st[0]
 tr1=pyaftan.aftantrace(tr.data, tr.stats)

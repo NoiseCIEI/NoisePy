@@ -28,7 +28,9 @@ A python module for seismic data analysis based on ASDF database
 import pyasdf
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.pylab as plb
 import matplotlib.dates as mdates
+from matplotlib.colors import LightSource
 import obspy
 import warnings
 import copy
@@ -46,6 +48,8 @@ from pyproj import Geod
 from obspy.taup import TauPyModel
 import CURefPy
 import glob
+import pycpt
+from netCDF4 import Dataset
 
 # from obspy.signal.invsim import corn_freq_2_paz
 sta_info_default={'rec_func': 0, 'xcorr': 1, 'isnet': 0}
@@ -252,9 +256,9 @@ class noiseASDF(pyasdf.ASDFDataSet):
             distEW, az, baz=obspy.geodetics.gps2dist_azimuth(minlat, minlon, minlat, maxlon) # distance is in m
             distNS, az, baz=obspy.geodetics.gps2dist_azimuth(minlat, minlon, maxlat+2., minlon) # distance is in m
             m = Basemap(width=distEW, height=distNS, rsphere=(6378137.00,6356752.3142), resolution='l', projection='lcc',\
-                lat_1=minlat, lat_2=maxlat, lon_0=lon_centre, lat_0=lat_centre+1)
-            m.drawparallels(np.arange(-80.0,80.0,10.0), linewidth=1, dashes=[2,2], labels=[1,1,0,0], fontsize=15)
-            m.drawmeridians(np.arange(-170.0,170.0,10.0), linewidth=1, dashes=[2,2], labels=[0,0,1,0], fontsize=15)
+                lat_1=minlat-2, lat_2=maxlat, lon_0=lon_centre, lat_0=lat_centre+1)
+            m.drawparallels(np.arange(-80.0,80.0,5.0), linewidth=1, dashes=[2,2], labels=[1,1,0,0], fontsize=15)
+            m.drawmeridians(np.arange(-170.0,170.0,5.0), linewidth=1, dashes=[2,2], labels=[0,0,1,0], fontsize=15)
         m.drawcoastlines(linewidth=1.0)
         m.drawcountries(linewidth=1.)
         # m.fillcontinents(lake_color='#99ffff',zorder=0.2)
@@ -265,8 +269,163 @@ class noiseASDF(pyasdf.ASDFDataSet):
             pass
         return m
     
+    def _my_get_basemap(self, geopolygons=None, epsg=4269, xpixels=20000): #epsg code for America is 4269
+        """Get basemap for plotting results. Use arcgisimage() to get high resolution background.
+            Revised by Hongda, NOV 2016
+        """
+        try:
+            minlon=self.minlon; maxlon=self.maxlon; minlat=self.minlat; maxlat=self.maxlat
+        except AttributeError:
+            self.get_limits_lonlat()
+            minlon=self.minlon-2.; maxlon=self.maxlon+2.; minlat=self.minlat-2.; maxlat=self.maxlat+2.
+        m = Basemap(llcrnrlon=minlon,llcrnrlat=minlat,urcrnrlon=maxlon,urcrnrlat=maxlat, epsg=epsg)
+        m.arcgisimage(service='ESRI_Imagery_World_2D', xpixels = xpixels, verbose=False)
+        m.drawcoastlines(linewidth=1.0)
+        m.drawcountries(linewidth=1.0)
+        # m.fillcontinents(lake_color='#99ffff',zorder=0.2)
+        m.drawmapboundary(fill_color="white")
+        try:
+            geopolygons.PlotPolygon(inbasemap=m)
+        except:
+            pass
+        return m
+
+    def _my_2nd_get_basemap(self, projection='lambert', geopolygons=None, resolution='i'):
+        """Get basemap for plotting results. Use the etopo1 file to generate colored mesh as the basemap for high resolution background.
+            Revised by Hongda, NOV 2016
+        """
+        try:
+            minlon=self.minlon; maxlon=self.maxlon; minlat=self.minlat; maxlat=self.maxlat
+        except AttributeError:
+            self.get_limits_lonlat()
+            minlon=self.minlon; maxlon=self.maxlon; minlat=self.minlat; maxlat=self.maxlat
+        lat_centre = (maxlat+minlat)/2.0
+        lon_centre = (maxlon+minlon)/2.0
+        if projection=='merc':
+            m=Basemap(projection='merc', llcrnrlat=minlat-5., urcrnrlat=maxlat+5., llcrnrlon=minlon-5.,
+                      urcrnrlon=maxlon+5., lat_ts=20, resolution=resolution)
+            m.drawparallels(np.arange(-80.0,80.0,5.0), labels=[1,0,0,1])
+            m.drawmeridians(np.arange(-170.0,170.0,5.0), labels=[1,0,0,1])
+            m.drawstates(color='g', linewidth=2.)
+        elif projection=='global':
+            m=Basemap(projection='ortho',lon_0=lon_centre, lat_0=lat_centre, resolution=resolution)
+        elif projection=='regional_ortho':
+            m1 = Basemap(projection='ortho', lon_0=minlon, lat_0=minlat, resolution='l')
+            m = Basemap(projection='ortho', lon_0=minlon, lat_0=minlat, resolution=resolution,\
+                llcrnrx=0., llcrnry=0., urcrnrx=m1.urcrnrx/mapfactor, urcrnry=m1.urcrnry/3.5)
+            m.drawparallels(np.arange(-80.0,80.0,10.0), labels=[1,0,0,0],  linewidth=2,  fontsize=20)
+            m.drawmeridians(np.arange(-170.0,170.0,10.0),  linewidth=2)
+        elif projection=='lambert':
+            distEW, az, baz=obspy.geodetics.gps2dist_azimuth(minlat, minlon, minlat, maxlon) # distance is in m
+            distNS, az, baz=obspy.geodetics.gps2dist_azimuth(minlat, minlon, maxlat+2., minlon) # distance is in m
+            m = Basemap(width=distEW, height=distNS, rsphere=(6378137.00,6356752.3142), resolution=resolution, projection='lcc',\
+                lat_1=minlat-1, lat_2=maxlat+1, lon_0=lon_centre, lat_0=lat_centre)
+            m.drawparallels(np.arange(-80.0,80.0,5.0), linewidth=1, dashes=[2,2], labels=[1,1,0,0], fontsize=15)
+            m.drawmeridians(np.arange(-170.0,170.0,5.0), linewidth=1, dashes=[2,2], labels=[0,0,1,0], fontsize=15)
+        m.drawcoastlines(linewidth=1.0)
+        m.drawcountries(linewidth=1.0)
+        """
+            Use the etopo1 file to draw a colored mesh as the basemap. Hongda, Nov 2016
+        """
+        mycm=pycpt.load.gmtColormap('/projects/howa1663/Code/ToolKit/Models/ETOPO1/ETOPO1.cpt')
+        etopo1 = Dataset('/projects/howa1663/Code/ToolKit/Models/ETOPO1/ETOPO1_Ice_g_gmt4.grd', 'r') # read in the etopo1 file which was used as the basemap
+        lons = etopo1.variables["x"][:]
+        west = lons<0 # mask array with negetive longitudes
+        west = 360.*west*np.ones(len(lons))
+        lons = lons+west
+        lats = etopo1.variables["y"][:]
+        z = etopo1.variables["z"][:]
+        etopoz=z[(lats>(minlat-2))*(lats<(maxlat+2)), :]
+        etopoz=etopoz[:, (lons>(minlon-2))*(lons<(maxlon+2))]
+        lats=lats[(lats>(minlat-2))*(lats<(maxlat+2))]
+        lons=lons[(lons>(minlon-2))*(lons<(maxlon+2))]
+        x, y = m(*np.meshgrid(lons,lats))
+        m.pcolormesh(x, y, etopoz, shading='gouraud', cmap=mycm, vmin=etopoz.min(), vmax=(etopoz.max()+400))
+        m.drawmapboundary(fill_color="white")
+        try:
+            geopolygons.PlotPolygon(inbasemap=m)
+        except:
+            pass
+        return m
+
+    def _my_3rd_get_basemap(self, projection='lambert', geopolygons=None, resolution='i', azdeg=315, altdeg=45, blend_mode='soft', bound=True):
+        """Get basemap for plotting results. Use the etopo1 file to generate colored mesh as the basemap for high resolution background.
+            Add shading to impove basemap detail, enable showing gradient.
+            -- Hongda, Jan 2017
+        --------------------------------------------------------------------------------------------------------------------------------
+            Parameters:
+                projection: choose different projection types
+                geoploygons:
+                resolution:
+                zadeg: azimuth in degree(from the North) of the light source
+                altdeg: altitude in degree(from the horizontal) of the light source
+                blend_mode: blend_mode of the shading, i.e.: overlay, hsv, soft...
+                bound: draw plate boundaries. True or False
+        """
+        try:
+            minlon=self.minlon; maxlon=self.maxlon; minlat=self.minlat; maxlat=self.maxlat
+        except AttributeError:
+            self.get_limits_lonlat()
+            minlon=self.minlon; maxlon=self.maxlon; minlat=self.minlat; maxlat=self.maxlat
+        lat_centre = (maxlat+minlat)/2.0
+        lon_centre = (maxlon+minlon)/2.0
+        if projection=='merc':
+            m=Basemap(projection='merc', llcrnrlat=minlat-5., urcrnrlat=maxlat+5., llcrnrlon=minlon-5.,
+                      urcrnrlon=maxlon+5., lat_ts=20, resolution=resolution)
+            m.drawparallels(np.arange(-80.0,80.0,5.0), labels=[1,0,0,1])
+            m.drawmeridians(np.arange(-170.0,170.0,5.0), labels=[1,0,0,1])
+            m.drawstates(color='g', linewidth=2.)
+        elif projection=='global':
+            m=Basemap(projection='ortho',lon_0=lon_centre, lat_0=lat_centre, resolution=resolution)
+        elif projection=='regional_ortho':
+            m1 = Basemap(projection='ortho', lon_0=minlon, lat_0=minlat, resolution='l')
+            m = Basemap(projection='ortho', lon_0=minlon, lat_0=minlat, resolution=resolution,\
+                llcrnrx=0., llcrnry=0., urcrnrx=m1.urcrnrx/mapfactor, urcrnry=m1.urcrnry/3.5)
+            m.drawparallels(np.arange(-80.0,80.0,10.0), labels=[1,0,0,0],  linewidth=2,  fontsize=20)
+            m.drawmeridians(np.arange(-170.0,170.0,10.0),  linewidth=2)
+        elif projection=='lambert':
+            distEW, az, baz=obspy.geodetics.gps2dist_azimuth(minlat, minlon, minlat, maxlon) # distance is in m
+            distNS, az, baz=obspy.geodetics.gps2dist_azimuth(minlat, minlon, maxlat+2., minlon) # distance is in m
+            m = Basemap(width=distEW, height=distNS, rsphere=(6378137.00,6356752.3142), resolution=resolution, projection='lcc',\
+                lat_1=minlat-1, lat_2=maxlat+1, lon_0=lon_centre, lat_0=lat_centre)
+            m.drawparallels(np.arange(-80.0,80.0,5.0), linewidth=1, dashes=[2,2], labels=[1,1,0,0], fontsize=15)
+            m.drawmeridians(np.arange(-170.0,170.0,5.0), linewidth=1, dashes=[2,2], labels=[0,0,0,1], fontsize=15)
+        m.drawcoastlines(linewidth=1.0)
+        m.drawcountries(linewidth=1.0)
+        m.drawstates(linewidth=1.0)
+        if bound:
+            try:
+                m.readshapefile('/projects/howa1663/Code/ToolKit/Models/Plates/PB2002_plates', name='PB2002_plates', drawbounds=True, linewidth=1, color='orange') # draw plate boundary on basemap
+            except IOError:
+                print("Couldn't read shape file! Continue without drawing plateboundaries")
+        try:
+            mycm=pycpt.load.gmtColormap('/projects/howa1663/Code/ToolKit/Models/ETOPO1/ETOPO1.cpt')
+            etopo1 = Dataset('/projects/howa1663/Code/ToolKit/Models/ETOPO1/ETOPO1_Ice_g_gmt4.grd', 'r') # read in the etopo1 file which was used as the basemap
+        except IOError:
+            print("Couldn't read etopo data or color map file! Check file directory!")
+        lons = etopo1.variables["x"][:]
+        west = lons<0 # mask array with negetive longitudes
+        west = 360.*west*np.ones(len(lons))
+        lons = lons+west
+        lats = etopo1.variables["y"][:]
+        z = etopo1.variables["z"][:]
+        etopoz=z[(lats>(minlat-2))*(lats<(maxlat+2)), :]
+        etopoz=etopoz[:, (lons>(minlon-2))*(lons<(maxlon+2))]
+        lats=lats[(lats>(minlat-2))*(lats<(maxlat+2))]
+        lons=lons[(lons>(minlon-2))*(lons<(maxlon+2))]
+        etopoZ = m.transform_scalar(etopoz, lons-360*(lons>180)*np.ones(len(lons)), lats, etopoz.shape[0], etopoz.shape[1]) # tranform the altitude grid into the projected coordinate
+        ls = LightSource(azdeg=azdeg, altdeg=altdeg)
+        rgb = ls.shade(etopoZ, cmap=mycm, vert_exag=0.05, blend_mode=blend_mode)
+        m.imshow(rgb)
+        m.drawmapboundary(fill_color="white")
+        try:
+            geopolygons.PlotPolygon(inbasemap=m)
+        except:
+            pass
+        return m
+    
     def plot_stations(self, projection='lambert', geopolygons=None, showfig=True):
-        self.minlon=85; self.maxlon=125; self.minlat=25; self.maxlat=45
+    #    self.minlon=85; self.maxlon=125; self.minlat=25; self.maxlat=45
         staLst=self.waveforms.list()
         stalons=np.array([]); stalats=np.array([])
         for staid in staLst:
@@ -276,9 +435,91 @@ class noiseASDF(pyasdf.ASDFDataSet):
         m.etopo()
         # m.shadedrelief()
         stax, stay=m(stalons, stalats)
-        m.plot(stax, stay, '^', markersize=3)
+        m.plot(stax, stay, 'ko', markersize=8)
         # plt.title(str(self.period)+' sec', fontsize=20)
         if showfig: plt.show()
+
+    def my_plot_stations(self, projection='lambert', geopolygons=None, resolution='i', title='', showfig=True, bound=True):  #(self, geopolygons=None, epsg=4269, xpixels=20000, showfig=True):
+    #   Hongda's plot_stations. Add flag to use different markers for different "networks".
+        staLst=self.waveforms.list()
+        stalons=np.array([]); stalats=np.array([]); staflags=np.array([]);netcodes=np.array([]);stacodes=np.array([])
+        for staid in staLst:
+            stla, evz, stlo=self.waveforms[staid].coordinates.values()
+            stalons = np.append(stalons, stlo); stalats=np.append(stalats, stla)
+            netcode = self.waveforms[staid].StationXML.networks[0].code
+            netcodes = np.append(netcodes, netcode)
+            stacode = self.waveforms[staid].StationXML.networks[0].stations[0].code
+            stacodes = np.append(stacodes, stacode)
+            stafl = self.auxiliary_data.StaInfo[netcode][stacode].parameters['xcorr']
+            staflags = np.append(staflags, stafl) # the type of maker used for the station depends on staflags%10, if staflags>10, tag the station name
+        m = self._my_3rd_get_basemap(projection=projection, geopolygons=geopolygons, resolution=resolution, bound=bound)
+        # m.shadedrelief()
+        stax, stay = m(stalons, stalats)
+        for i in range(len(stalons)):
+            if staflags[i]%10 == 0:
+                m.plot(stax[i], stay[i], 'gs', markersize=10)
+            elif staflags[i]%10 == 1:
+                m.plot(stax[i], stay[i], 'b^', markersize=10)
+            elif staflags[i]%10 == 2:
+                m.plot(stax[i], stay[i], 'ro', markersize=10)
+            elif staflags[i]% 10 == 3:
+                m.plot(stax[i], stay[i], 'cp', markersize=10)
+            elif staflags[i]% 10 == 4:
+                m.plot(stax[i], stay[i], 'yp', markersize=10)
+            elif staflags[i]%10 == 5:
+                m.plot(stax[i], stay[i], 'go', markersize=10, mec="black")
+            elif staflags[i]%10 == 6:
+                m.plot(stax[i], stay[i], 'cp', markersize=10)
+            elif staflags[i]%10 == 7:
+                m.plot(stax[i], stay[i], 'rp', markersize=10)
+            elif staflags[i]%10 == 8:
+                m.plot(stax[i], stay[i], 'wo', markersize=10, mec="black")
+            elif staflags[i]%10 == 9:
+                m.plot(stax[i], stay[i], 'ws', markersize=10, mec="black")
+            else:
+                print "The flag for marking " + stacodes[i] + " is wrong(not an integer)"
+            if staflags[i] >= 10:
+                plt.text(stax[i]-5000, stay[i]-5000, '%s' % (stacodes[i]), color='w')
+        # for j in range(int(len(stalons)/5)): # decide which stations that you want to add station name besides them
+        #     plt.text(stax[5*j]-5000, stay[5*j]-5000, '%s' % (stacodes[5*j]))
+        # plt.title(str(self.period)+' sec', fontsize=20)
+        plt.title(title, fontsize=15)
+        if showfig: plt.show()
+        
+    def my_plot_sta_with_path(self, projection='lambert', geopolygons=None, resolution='i', tag_name=np.array([]), used_staLst=np.array([]), pathLst=np.array([]), bound=True):
+        """
+        Plot stations used for tomography and those paths which was removed
+        tag_name: the stations that you want to mark their names, you have to the where these stations are in the staLst which is hard, modification needed!
+        used_staLst: The station list that was used, used_staLst[0,:]: latitude, used_staLst[1,:]: longitude. Each station will appear multiple times
+        """
+        m = self._my_3rd_get_basemap(projection=projection, geopolygons=geopolygons, resolution=resolution, bound=bound)
+        staLat = np.array([]); staLon = np.array([]); staN = np.array([])# Full station list, each station only appear once [0]lat, [1]lon, [2] path number this station has
+        for i in range(used_staLst.shape[1]):
+            if not used_staLst[0,i] in staLat:
+                staLat = np.append(staLat, used_staLst[0,i])
+                staLon = np.append(staLon, used_staLst[1,i])
+                staN = np.append(staN,1)
+            elif not used_staLst[1,i] in staLon[np.where(staLat==used_staLst[0,i])]:
+                staLat = np.append(staLat, used_staLst[0,i])
+                staLon = np.append(staLon, used_staLst[1,i])
+                staN = np.append(staN,1)
+            else:
+                ind1 = np.in1d(staLat,used_staLst[0,i]) & np.in1d(staLon,used_staLst[1,i])
+                ind1 = np.where(ind1==True)
+                if ind1[0].size != 1:
+                    print "Find " + str(ind1[0].size) + " stations with the same latitude and longitude"
+                staN[ind1] += 1 # increase the count of this station's appearence
+        stax, stay = m(staLon, staLat)
+        evx, evy = m(pathLst[1], pathLst[0])
+        stx, sty = m(pathLst[3], pathLst[2])
+        for j in  range(pathLst.shape[1]):
+            m.plot([evx[j], stx[j]],[evy[j],sty[j]], c='grey', zorder=1)
+        plt.scatter(stax, stay, c=staN, cmap='rainbow', vmin=staN.min(), vmax=staN.max(), zorder=2, s=150)
+        plt.colorbar()
+        for k in tag_name: # Tag the station name
+            plt.text(stax[k]-5000, stay[k]-5000, '%s' % (stacodes[k]))
+        # plt.title(str(self.period)+' sec', fontsize=20)
+        plt.show()
     
     def wsac_xcorr(self, netcode1, stacode1, netcode2, stacode2, chan1, chan2, outdir='.', pfx='COR'):
         """Write cross-correlation data from ASDF to sac file
@@ -377,8 +618,9 @@ class noiseASDF(pyasdf.ASDFDataSet):
         pfx                     - prefix
         inchannels              - input channels, if None, will read channel information from obspy inventory
         fnametype               - input sac file name type
-                                    =1: datadir/COR/G12A/COR_G12A_BHZ_R21A_BHZ.SAC
-                                    =2: datadir/COR/G12A/COR_G12A_R21A.SAC
+                                    =1: datadir/COR/G12A/COR_G12A_BHZ_R21A_BHZ.SAC  # with netcodes 
+                                    =2: datadir/COR/G12A/COR_G12A_R21A.SAC  # with netcodes
+                                    =3: datadir/G12A/COR_G12A_R21A.SAC
         -----------------------------------------------------------------------------------------------------------
         Output:
         ASDF path           : self.auxiliary_data.NoiseXcorr[netcode1][stacode1][netcode2][stacode2][chan1][chan2]
@@ -420,10 +662,14 @@ class noiseASDF(pyasdf.ASDFDataSet):
                             fname=datadir+'/'+pfx+'/'+staid1+'/'+pfx+'_'+staid1+'_'+chan1.code+'_'+staid2+'_'+chan2.code+'.SAC'
                         elif fnametype==2:
                             fname=datadir+'/'+pfx+'/'+staid1+'/'+pfx+'_'+staid1+'_'+staid2+'.SAC'
+                        elif fnametype==3:
+                            fname=datadir+'/'+stacode1+'/'+pfx+'_'+stacode1+'_'+stacode2+'.SAC'
                         try:
                             tr=obspy.core.read(fname)[0]
+                            print "Done reading file: "+datadir+'/'+stacode1+'/'+pfx+'_'+stacode1+'_'+stacode2+'.SAC'
                         except IOError:
                             skipflag=True
+                            print "Couldn't read file: "+datadir+'/'+stacode1+'/'+pfx+'_'+stacode1+'_'+stacode2+'.SAC'
                             break
                         # write cross-correlation header information
                         xcorr_header=xcorr_header_default.copy()
@@ -1034,7 +1280,7 @@ class noiseASDF(pyasdf.ASDFDataSet):
         return
                
     def xcorr_aftan_mp(self, outdir, channel='ZZ', tb=0., inftan=pyaftan.InputFtanParam(), basic1=True, basic2=True,
-            pmf1=True, pmf2=True, verbose=True, prephdir=None, f77=True, pfx='DISP', subsize=1000, deletedisp=True, nprocess=None):
+            pmf1=True, pmf2=True, verbose=True, prephdir=None, f77=True, pfx='DISP', subsize=1000, deletedisp=True, nprocess=None, snumb=0):
         """ aftan analysis of cross-correlation data with multiprocessing
         =======================================================================================
         Input Parameters:
@@ -1090,6 +1336,7 @@ class noiseASDF(pyasdf.ASDFDataSet):
         if len(inputStream) > subsize:
             Nsub = int(len(inputStream)/subsize)
             for isub in xrange(Nsub):
+                if isub < snumb: continue
                 print 'Subset:', isub,'in',Nsub,'sets'
                 cstream=inputStream[isub*subsize:(isub+1)*subsize]
                 AFTAN = partial(aftan4mp, outdir=outdir, inftan=inftan, prephdir=prephdir, f77=f77, pfx=pfx)
@@ -1110,6 +1357,7 @@ class noiseASDF(pyasdf.ASDFDataSet):
             pool.close() #we are not adding any more processes
             pool.join() #tell it to wait until all threads are done before going on
         print 'End of multiprocessing aftan analysis !'
+        return
         print 'Reading aftan results into ASDF Dataset !'
         for staid1 in staLst:
             for staid2 in staLst:
@@ -1163,6 +1411,133 @@ class noiseASDF(pyasdf.ASDFDataSet):
                         parameters={'Tc': 0, 'To': 1, 'Vgr': 2, 'Vph': 3, 'ampdb': 4, 'snrdb': 5, 'mhw': 6, 'amp': 7, 'snr':8, 'Np': nfout2_2}
                         self.add_auxiliary_data(data=arr2_2, data_type='DISPpmf2', path=staid_aux, parameters=parameters)
         if deletedisp: shutil.rmtree(outdir+'/'+pfx)
+        return
+    
+    def plot_ftan_curve(self, netcode1='', stacode1='', netcode2='', stacode2='', chan='ZZ', plotflag=3, sacname='', ymin=None, ymax=None):
+        """
+        Plot the dispersion curve from FTAN analysis        Debug needed!
+        ====================================================================
+        Input Parameters:
+        plotflag -
+            0: only Basic FTAN
+            1: only Phase Matched Filtered FTAN
+            2: both
+            3: both in one figure
+        sacname - sac file name than can be used as the title of the figure
+                                                            Hongda Wang, Nov 30 2016
+        ====================================================================
+        """
+        try:
+            arr1_1=self.auxiliary_data.DISPbasic1[netcode1][stacode1][netcode2][stacode2][chan]
+        except:
+            print "Auxiliary data not found, trying to switch oder the 2 stations"
+            netcode1, netcode2=netcode2, netcode1
+            stacode1, stacode2=stacode2, stacode1
+        try:
+            arr1_1=self.auxiliary_data.DISPbasic1[netcode1][stacode1][netcode2][stacode2][chan]
+        except:
+            return "Error: FTAN Parameters are not available!"
+        
+        if (plotflag!=1 and plotflag!=3):
+            arr1_1=self.auxiliary_data.DISPbasic1[netcode1][stacode1][netcode2][stacode2][chan]
+            nfout1_1=arr1_1.parameters['Np']
+            obper1_1=arr1_1.data.value[1,:nfout1_1]
+            gvel1_1=arr1_1.data.value[2,:nfout1_1]
+            phvel1_1=arr1_1.data.value[3,:nfout1_1]
+            plb.figure()
+            ax = plt.subplot()
+            ax.plot(obper1_1, gvel1_1, '--k', lw=3) #
+            ax.plot(obper1_1, phvel1_1, '--r', lw=3) #
+            arr2_1=self.auxiliary_data.DISPbasic2[netcode1][stacode1][netcode2][stacode2][chan]
+            nfout2_1=arr2_1.parameters['Np']
+            if (nfout2_1!=0):
+                obper2_1=arr2_1.data.value[1,:nfout2_1]
+                gvel2_1=arr2_1.data.value[2,:nfout2_1]
+                phvel2_1=arr2_1.data.value[3,:nfout2_1]
+                ax.plot(obper2_1, gvel2_1, '-k', lw=3) #
+                ax.plot(obper2_1, phvel2_1, '-r', lw=3) #
+                # plt.axis([Tmin1, Tmax1, vmin1, vmax1])
+            plt.xlabel('Period(s)')
+            plt.ylabel('Velocity(km/s)')
+            plt.title('Basic FTAN Diagram '+sacname,fontsize=15)
+        arr1_2=self.auxiliary_data.DISPpmf1[netcode1][stacode1][netcode2][stacode2][chan]
+        nfout1_2=arr1_2.parameters['Np']
+        print "nfout1_2 is: " + str(nfout1_2)
+        if nfout1_2==0 and plotflag!=0:
+            print "Error: No PMF FTAN parameters!"
+            return
+        
+        if (plotflag!=0 and plotflag!=3):
+            arr1_2=self.auxiliary_data.DISPpmf1[netcode1][stacode1][netcode2][stacode2][chan]
+            nfout1_2=arr1_2.parameters['Np']
+            obper1_2=arr1_2.data.value[1,:nfout1_2]
+            gvel1_2=arr1_2.data.value[2,:nfout1_2]
+            phvel1_2=arr1_2.data.value[3,:nfout1_2]
+            plb.figure()
+            ax = plt.subplot()
+            ax.plot(obper1_2, gvel1_2, '--k', lw=3) #
+            ax.plot(obper1_2, phvel1_2, '--r', lw=3) #
+            arr2_2=self.auxiliary_data.DISPpmf2[netcode1][stacode1][netcode2][stacode2][chan]
+            nfout2_2=arr2_2.parameters['Np']
+            if (nfout2_2!=0):
+                obper2_2=arr2_2.data.value[1,:nfout2_2]
+                gvel2_2=arr2_2.data.value[2,:nfout2_2]
+                phvel2_2=arr2_2.data.value[3,:nfout2_2]
+                ax.plot(obper2_2, gvel2_2, '-k', lw=3) #
+                ax.plot(obper2_2, phvel2_2, '-r', lw=3) #
+            plt.xlabel('Period(s)')
+            plt.ylabel('Velocity(km/s)')
+            plt.title('PMF FTAN Diagram '+sacname,fontsize=15)
+            
+        if ( plotflag==3 ):
+            arr1_1=self.auxiliary_data.DISPbasic1[netcode1][stacode1][netcode2][stacode2][chan]
+            nfout1_1=arr1_1.parameters['Np']
+            print "nfout1_1 is:" + str(nfout1_1)
+            obper1_1=arr1_1.data.value[1,:nfout1_1]
+            gvel1_1=arr1_1.data.value[2,:nfout1_1]
+            phvel1_1=arr1_1.data.value[3,:nfout1_1]
+            plb.figure(num=None, figsize=(18, 16), dpi=80, facecolor='w', edgecolor='k')
+            ax = plt.subplot(2,1,1)
+            ax.plot(obper1_1, gvel1_1, '--k', lw=3) #
+            ax.plot(obper1_1, phvel1_1, '--r', lw=3) #
+            arr2_1=self.auxiliary_data.DISPbasic2[netcode1][stacode1][netcode2][stacode2][chan]
+            nfout2_1=arr2_1.parameters['Np']
+            print "nfout2_1 is:" + str(nfout2_1)
+            if (nfout2_1!=0):
+                obper2_1=arr2_1.data.value[1,:nfout2_1]
+                gvel2_1=arr2_1.data.value[2,:nfout2_1]
+                phvel2_1=arr2_1.data.value[3,:nfout2_1]
+                ax.plot(obper2_1, gvel2_1, '-k', lw=3) #
+                ax.plot(obper2_1, phvel2_1, '-r', lw=3) #
+                # plt.axis([Tmin1, Tmax1, vmin1, vmax1])    
+            plt.ylim(ymin, ymax)
+            plt.xlabel('Period(s)')
+            plt.ylabel('Velocity(km/s)')
+            plt.title('Basic FTAN Diagram '+sacname)
+            
+            arr1_2=self.auxiliary_data.DISPpmf1[netcode1][stacode1][netcode2][stacode2][chan]
+            nfout1_2=arr1_2.parameters['Np']
+            print "nfout1_2 is :" + str(nfout1_2)
+            obper1_2=arr1_2.data.value[1,:nfout1_2]
+            gvel1_2=arr1_2.data.value[2,:nfout1_2]
+            phvel1_2=arr1_2.data.value[3,:nfout1_2]
+            ax = plt.subplot(2,1,2)
+            ax.plot(obper1_2, gvel1_2, '--k', lw=3) #
+            ax.plot(obper1_2, phvel1_2, '--r', lw=3) #
+            arr2_2=self.auxiliary_data.DISPpmf2[netcode1][stacode1][netcode2][stacode2][chan]
+            nfout2_2=arr2_2.parameters['Np']
+            print "nfout2_2 is:" + str(nfout2_2)
+            if (nfout2_2!=0):
+                obper2_2=arr2_2.data.value[1,:nfout2_2]
+                gvel2_2=arr2_2.data.value[2,:nfout2_2]
+                phvel2_2=arr2_2.data.value[3,:nfout2_2]
+                ax.plot(obper2_2, gvel2_2, '-k', lw=3) #
+                ax.plot(obper2_2, phvel2_2, '-r', lw=3) #
+            plt.ylim(ymin, ymax)
+            plt.xlabel('Period(s)')
+            plt.ylabel('Velocity(km/s)')
+            plt.title('PMF FTAN Diagram '+sacname)
+        plt.show()
         return
     
     def interp_disp(self, data_type='DISPpmf2', channel='ZZ', pers=np.array([]), verbose=True):
@@ -1346,6 +1721,7 @@ class noiseASDF(pyasdf.ASDFDataSet):
                     inbound=data[index['inbound']][ind_per]
                     # quality control
                     if pvel < 0 or gvel < 0 or pvel>10 or gvel>10 or snr >1e10: continue
+                    if max(np.isnan([pvel, gvel, snr]))!=False: continue # skip if parameters in dispersion curve is nan
                     if inbound!=1.: continue
                     if snr < 15.: continue
                     fph=fph_lst[iper]
@@ -1416,6 +1792,7 @@ class noiseASDF(pyasdf.ASDFDataSet):
                     inbound=data[index['inbound']][ind_per]
                     # quality control
                     if pvel < 0 or gvel < 0 or pvel>10 or gvel>10 or snr >1e10: continue
+                    if max(np.isnan([pvel, gvel, snr]))!=False: continue # skip if parameters in dispersion curve is nan
                     if inbound!=1.: continue
                     if snr < 15.: continue
                     field_lst[iper]=np.append(field_lst[iper], lon2)
@@ -1511,6 +1888,8 @@ def stack4mp(inv, datadir, outdir, ylst, mlst, pfx, fnametype):
     return
 
 def aftan4mp(aTr, outdir, inftan, prephdir, f77, pfx):
+    chan1=aTr.stats.sac.kcmpnm[:3]
+    chan2=aTr.stats.sac.kcmpnm[3:]
     # print 'aftan analysis for: '+ aTr.stats.sac.kuser0+'.'+aTr.stats.sac.kevnm+'_'+chan1+'_'+aTr.stats.network+'.'+aTr.stats.station+'_'+chan2
     if prephdir !=None:
         phvelname = prephdir + "/%s.%s.pre" %(aTr.stats.sac.kuser0+'.'+aTr.stats.sac.kevnm, aTr.stats.network+'.'+aTr.stats.station)
@@ -1527,8 +1906,6 @@ def aftan4mp(aTr, outdir, inftan, prephdir, f77, pfx):
             tresh=inftan.tresh, ffact=inftan.ffact, taperl=inftan.taperl, snr=inftan.snr, fmatch=inftan.fmatch, nfin=inftan.nfin,
                 npoints=inftan.npoints, perc=inftan.perc, phvelname=phvelname)
     aTr.get_snr(ffact=inftan.ffact) # SNR analysis
-    chan1=aTr.stats.sac.kcmpnm[:3]
-    chan2=aTr.stats.sac.kcmpnm[3:]
     foutPR=outdir+'/'+pfx+'/'+aTr.stats.sac.kuser0+'.'+aTr.stats.sac.kevnm+'/'+ \
                 pfx+'_'+aTr.stats.sac.kuser0+'.'+aTr.stats.sac.kevnm+'_'+chan1+'_'+aTr.stats.network+'.'+aTr.stats.station+'_'+chan2+'.SAC'
     aTr.ftanparam.writeDISPbinary(foutPR)
@@ -1833,8 +2210,8 @@ class quakeASDF(pyasdf.ASDFDataSet):
             Nsub = int(len(reqwaveLst)/subsize)
             # if enumb==None: enumb=Nsub
             for isub in xrange(Nsub):
-                # if isub < snumb: continue
-                # if isub > enumb: continue
+                    # if isub < snumb: continue
+                    # if isub > enumb: continue
                 print 'Subset:', isub+1,'in',Nsub,'sets'
                 creqlst=reqwaveLst[isub*subsize:(isub+1)*subsize]
                 GETDATA = partial(get_waveforms4mp, outdir=outdir, client=client, pre_filt = (0.001, 0.005, 1, 100.0), verbose=verbose, rotation=False)

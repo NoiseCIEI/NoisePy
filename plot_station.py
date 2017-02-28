@@ -1,11 +1,8 @@
 import ASDFDBase
-import GeoPolygon
 
-basins=GeoPolygon.GeoPolygonLst()
-basins.ReadGeoPolygonLst('basin1')
-
-dset=ASDFDBase.noiseASDF('./EA_chinaarray2.h5')
-#dset.read_stationtxt(stafile='station.lst', source='CIEI', chans=['BHZ', 'BHE', 'BHN'], dnetcode='TA')
+dset=ASDFDBase.noiseASDF('CC_JdF_4_plotSta.h5')
+# dset.read_stationtxt(stafile='/lustre/janus_scratch/howa1663/Seis_Data/SEED/station_plot.lst', source='CIEI', chans=['BHZ'])
+# dset.get_limits_lonlat()
 
 #dset.read_stationtxt(stafile='/work2/weisen/PAPER/FIG1/station_ChinaArray2.lst', source='CIEI', chans=['BHZ'], dnetcode='TA')
-dset.plot_stations(geopolygons=basins)
+dset.my_plot_stations()

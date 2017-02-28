@@ -318,6 +318,7 @@ class aftantrace(obspy.core.trace.Trace):
     """
     aftantrace:
     A derived class inherited from obspy.core.trace.Trace. This derived class have a variety of new member functions
+    class Trace(data=array(, []dtype=float64), header=None) # initial declaration of the parent class Trace
     """
     def init_ftanParam(self):
         """Initialize ftan parameters

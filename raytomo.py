@@ -115,7 +115,7 @@ class RayTomoDataSet(h5py.File):
                 #     f.writelines('v \n' );
                 f.writelines('v \nq \ngo \nEOF \n' )
             call(['bash', temprunsh])
-            os.remove(temprunsh)
+            # os.remove(temprunsh)
         # save to hdf5 dataset
         create_group=False
         while (not create_group):
@@ -151,6 +151,7 @@ class RayTomoDataSet(h5py.File):
             azidset=subgroup.create_dataset(name='azi_coverage', data=aziArr)
             inArr=np.loadtxt(residfname)
             residdset=subgroup.create_dataset(name='residual', data=inArr)
+			#residdset.attrs.create(name='res_tomo', data=8)
             inArr=np.loadtxt(resfname); resArr=inArr[:,2:]
             resdset=subgroup.create_dataset(name='path_density', data=resArr)
             if deletetxt: shutil.rmtree(outper)

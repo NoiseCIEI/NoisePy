@@ -1,2 +1,2 @@
-# NoisePy
-A python code for ambient noise and receiver function analysis
+# Noisepy
+Inherited from Lili, added some small changes and functions
